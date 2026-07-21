@@ -284,26 +284,7 @@
                                  n))))
       :assert)))
 
-;; ── batched record write: cl-write-strings vs insert loop ─────────────────
-
-(ert-deftest emacs-io-perf-strings-write-10k ()
-  "10K records batched: cl-write-strings vs insert loop, stream pre-allocated."
-  (emacs-io-perf--skip-unless-full
-   (let* ((n 10000)
-          (rec (format "%05d=%s\n" 0 (make-string 40 ?x)))
-          (total (* n (length rec)))
-          (lines (mapcar (lambda (i) (format "%05d=%s\n" i (make-string 40 ?x)))
-                         (number-sequence 0 (1- n)))))
-     (emacs-io-perf--report "strings-write 10K"
-       (emacs-io-perf--time (lambda ()
-                              (let ((s (cl-make-string-output-stream :size total)))
-                                (cl-write-strings lines s)
-                                (cl-get-output-stream-string s))))
-       (emacs-io-perf--time (lambda ()
-                              (with-temp-buffer
-                                (dolist (line lines) (insert line))
-                                (buffer-string))))
-       :assert))))
+;; ═══════════════════════════════════════════════════════════════════════════
 
 ;; ── chunked read: cl-read-chunk vs buffer-substring, same chunk size ──────
 
@@ -331,50 +312,6 @@
                                       (setq pos to)))
                                   n))))
        :assert))))
-
-;; ── batched bulk write: cl-write-strings vs insert loop ───────────────────
-
-(ert-deftest emacs-io-perf-strings-write-10m ()
-  "10 MB batched: cl-write-strings vs insert loop, stream pre-allocated."
-  (emacs-io-perf--skip-unless-full
-   (let* ((chunk (make-string 10240 ?x))
-          (n 1000)
-          (strings (make-list n chunk)))
-     (emacs-io-perf--report "strings-write 10M"
-       (emacs-io-perf--time (lambda ()
-                              (let ((s (cl-make-string-output-stream :size (* n 10240))))
-                                (cl-write-strings strings s)
-                                (cl-get-output-stream-string s))))
-       (emacs-io-perf--time (lambda ()
-                              (with-temp-buffer
-                                (dotimes (_ n) (insert chunk))
-                                (buffer-string))))
-        ;; 1000 copy_string_contents calls (one per element) vs 1000
-        ;; insert calls.  copy_string_contents does query+copy (two API
-        ;; crossings per call); insert is one internal operation.
-        nil))))
-
-;; ── batched bulk write (vector): cl-write-strings vec vs insert loop ────────
-
-(ert-deftest emacs-io-perf-strings-write-vec-10m ()
-  "10 MB batched via vector: cl-write-strings vs insert loop, stream pre-allocated."
-  (emacs-io-perf--skip-unless-full
-   (let* ((chunk (make-string 10240 ?x))
-          (n 1000)
-          (vec (apply #'vector (make-list n chunk))))
-     (emacs-io-perf--report "strings-write-vec 10M"
-       (emacs-io-perf--time (lambda ()
-                              (let ((s (cl-make-string-output-stream :size (* n 10240))))
-                                (cl-write-strings vec s)
-                                (cl-get-output-stream-string s))))
-       (emacs-io-perf--time (lambda ()
-                              (with-temp-buffer
-                                (dotimes (_ n) (insert chunk))
-                                (buffer-string))))
-       ;; vector path avoids car/cdr efuncall crossings per element.
-       nil))))
-
-;; ═══════════════════════════════════════════════════════════════════════════
 
 (provide 'emacs-io-perf-test)
 ;;; emacs-io-perf-test.el ends here

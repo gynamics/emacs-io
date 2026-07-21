@@ -50,8 +50,6 @@ extern emacs_value Fclear_input(emacs_env *env, ptrdiff_t nargs,
                                  emacs_value *args, void *data);
 extern emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs,
                                     emacs_value *args, void *data);
-extern emacs_value Fwrite_strings(emacs_env *env, ptrdiff_t nargs,
-                                   emacs_value *args, void *data);
 
 /* fileio.c */
 extern emacs_value Fopen(emacs_env *env, ptrdiff_t nargs,
@@ -272,15 +270,6 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "and stops at :END (default the length of SEQUENCE).\n"
         "Returns SEQUENCE.\n"
          "\n(fn SEQUENCE STREAM &key START END)", NULL);
-
-  defun(env, "cl-write-strings", Fwrite_strings, 1, 3,
-        "Write a list or vector of strings to STREAM in one module call.\n"
-        "\n"
-        "STRINGS is a Lisp list of strings.  STREAM defaults to\n"
-        "`*standard-output*'.  Returns STRINGS.\n"
-        "Use this to batch multiple writes and amortize the per-call\n"
-        "module-function crossing overhead.\n"
-        "\n(fn STRINGS &optional STREAM)", NULL);
 
   /* ── file I/O and streams ────────────────────────────────────────── */
   defun(env, "cl-open", Fopen, 1, 6,

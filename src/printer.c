@@ -235,39 +235,3 @@ emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   free(buf);
   return seq;
 }
-
-/* ── cl-write-strings ──────────────────────────────────────────────────── */
-
-emacs_value Fwrite_strings(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
-                            void *data) {
-  (void)data;
-  /* (cl-write-strings strings &optional stream)
-     Write a list or vector of strings to STREAM.  Returns STRINGS.
-     Vector access uses vec_get (direct C API, no module crossing);
-     list traversal uses car/cdr (one efuncall crossing per element). */
-  if (nargs < 1) {
-    signal_error(env, "cl-write-strings requires at least 1 argument");
-    return eintern(env, "nil");
-  }
-
-  cl_stream_t *s = get_stream_or_default(env, args, nargs, 1, "*standard-output*");
-  check_open(env, s, "cl-write-strings");
-
-  if (env->eq(env, env->type_of(env, args[0]), eintern(env, "vector"))) {
-    ptrdiff_t len = env->vec_size(env, args[0]);
-    for (ptrdiff_t i = 0; i < len; i++) {
-      stream_write_string(env, s, env->vec_get(env, args[0], i));
-      if (env->non_local_exit_check(env) != emacs_funcall_exit_return) break;
-    }
-  } else {
-    emacs_value tail = args[0];
-    while (env->is_not_nil(env, tail)) {
-      emacs_value str = efuncall(env, "car", 1, &tail);
-      stream_write_string(env, s, str);
-      if (env->non_local_exit_check(env) != emacs_funcall_exit_return) break;
-      tail = efuncall(env, "cdr", 1, &tail);
-    }
-  }
-
-  return args[0];
-}
