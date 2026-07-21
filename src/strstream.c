@@ -29,15 +29,19 @@ static const cl_stream_ops_t string_input_ops = {
 static ptrdiff_t sos_write(cl_stream_t *s, const void *buf, ptrdiff_t n);
 static int       sos_close(cl_stream_t *s);
 static void      sos_destroy(cl_stream_t *s);
+static ptrdiff_t sos_write_string(emacs_env *env, cl_stream_t *s, emacs_value str);
 
 static const cl_stream_ops_t string_output_ops = {
-  .read    = NULL,
-  .write   = sos_write,
-  .close   = sos_close,
-  .flush   = NULL,
-  .finish  = NULL,
-  .listen  = NULL,
-  .destroy = sos_destroy,
+  .read         = NULL,
+  .write        = sos_write,
+  .close        = sos_close,
+  .flush        = NULL,
+  .finish       = NULL,
+  .listen       = NULL,
+  .destroy      = sos_destroy,
+  .direct       = NULL,
+  .advance      = NULL,
+  .write_string = sos_write_string,
 };
 
 /* ── string input: create / read / close / listen ────────────────────── */
@@ -110,12 +114,29 @@ static void sis_advance(cl_stream_t *s, ptrdiff_t n) {
 
 /* ── string output: block-chain (no realloc copying) ────────────────────*/
 
-cl_stream_t *stream_create_string_output(void) {
+cl_stream_t *stream_create_string_output(size_t hint_size) {
   str_output_impl_t *so = calloc(1, sizeof(*so));
   if (!so) return NULL;
 
+  /* pre-allocate a single block if caller knows the expected size */
+  if (hint_size > 0) {
+    str_block_t *bk = malloc(sizeof(*bk) + hint_size + 1);  /* +1 for null */
+    if (bk) {
+      bk->next = NULL;
+      bk->len  = 0;
+      bk->cap  = hint_size;  /* user-visible capacity */
+      so->head = bk;
+      so->tail = bk;
+    }
+  }
+
   cl_stream_t *s = calloc(1, sizeof(*s));
-  if (!s) { free(so); return NULL; }
+  if (!s) {
+    str_block_t *bk = so->head;
+    while (bk) { str_block_t *n = bk->next; free(bk); bk = n; }
+    free(so);
+    return NULL;
+  }
 
   s->ops = &string_output_ops;
   s->impl = so;
@@ -158,6 +179,47 @@ static ptrdiff_t sos_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
   so->total_len += (size_t)n;
 
   return n;
+}
+
+static ptrdiff_t sos_write_string(emacs_env *env, cl_stream_t *s, emacs_value str) {
+  str_output_impl_t *so = (str_output_impl_t *)s->impl;
+  if (!so) return -1;
+
+  /* query size */
+  ptrdiff_t slen = 0;
+  if (!env->copy_string_contents(env, str, NULL, &slen)) return -1;
+  if (slen <= 1) return 0;
+
+  size_t n = (size_t)(slen - 1);
+
+  /* if tail block has room, write directly into it */
+  if (so->tail && so->tail->cap - so->tail->len >= n) {
+    ptrdiff_t copied = slen;
+    if (!env->copy_string_contents(env, str, so->tail->data + so->tail->len, &copied)) return -1;
+    so->tail->len += n;
+    so->total_len += n;
+    return (ptrdiff_t)n;
+  }
+
+  /* allocate new block */
+  str_block_t *bk = malloc(sizeof(*bk) + n + 1);
+  if (!bk) return -1;
+  bk->next = NULL;
+  bk->len = n;
+  bk->cap = n;
+
+  ptrdiff_t copied = slen;
+  if (!env->copy_string_contents(env, str, bk->data, &copied)) {
+    free(bk);
+    return -1;
+  }
+
+  if (!so->head) so->head = bk;
+  else so->tail->next = bk;
+  so->tail = bk;
+  so->total_len += n;
+
+  return (ptrdiff_t)n;
 }
 
 static int sos_close(cl_stream_t *s) {

@@ -294,6 +294,25 @@
        ;; Block-chain wins vs realloc but loses to Emacs' C-level insert.
        nil))))
 
+;; ── :size hint advantage: pre-allocated block, zero mallocs during write ──
+
+(ert-deftest emacs-io-perf-sized-write-10m ()
+  "10 MB with :size 10M hint — single block, no mallocs during write."
+  (emacs-io-perf--skip-unless-full
+   (let* ((data (make-string (* 10 1024 1024) ?x)))
+     (emacs-io-perf--report "sized-write 10M"
+       (emacs-io-perf--time (lambda ()
+                              (let ((s (cl-make-string-output-stream :size (length data))))
+                                (cl-write-string data s)
+                                (cl-get-output-stream-string s))))
+       (emacs-io-perf--time (lambda ()
+                              (with-temp-buffer
+                                (insert data)
+                                (buffer-string))))
+       ;; :size hint eliminates block allocation during write, but the
+       ;; module-function crossing overhead dominates single-call comparisons.
+       nil))))
+
 ;; ── File write: stream fd vs Emacs native (isolated from round-trip) ─────
 
 (ert-deftest emacs-io-perf-fd-write-10m ()

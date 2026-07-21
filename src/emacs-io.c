@@ -287,14 +287,17 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "The returned stream is an input stream with element type CHARACTER.\n"
         "\n(fn STRING &optional START END)", NULL);
 
-  defun(env, "cl-make-string-output-stream", Fmake_string_output, 0, 1,
+  defun(env, "cl-make-string-output-stream", Fmake_string_output, 0, 5,
         "Return a stream which accumulates output in a string.\n"
         "\n"
         "The accumulated string can be retrieved with\n"
         "`cl-get-output-stream-string'.\n"
         "The :ELEMENT-TYPE keyword is accepted for compatibility but\n"
         "currently ignored; the element type is always CHARACTER.\n"
-        "\n(fn &key ELEMENT-TYPE)", NULL);
+        ":SIZE N pre-allocates a single block of N bytes, eliminating\n"
+        "allocation overhead during writes.  Use when the output size\n"
+        "is known in advance.\n"
+        "\n(fn &key ELEMENT-TYPE SIZE)", NULL);
 
   defun(env, "cl-get-output-stream-string", Fget_output_stream_string, 1, 1,
         "Return the accumulated string from a string output stream.\n"

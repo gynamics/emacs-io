@@ -184,10 +184,13 @@ emacs_value Fmake_string_input(emacs_env *env, ptrdiff_t nargs,
 emacs_value Fmake_string_output(emacs_env *env, ptrdiff_t nargs,
                                 emacs_value *args, void *data) {
   (void)data;
-  (void)nargs;
-  (void)args;
-  /* (cl-make-string-output-stream &key element-type) — element-type ignored for now */
-  cl_stream_t *s = stream_create_string_output();
+  /* (cl-make-string-output-stream &key element-type size) */
+  size_t hint = 0;
+  for (ptrdiff_t i = 0; i < nargs - 1; i += 2) {
+    if (kw_eq(env, args[i], ":size"))
+      hint = (size_t)eint_extract(env, args[i + 1]);
+  }
+  cl_stream_t *s = stream_create_string_output(hint);
   if (!s) {
     signal_error(env, "Cannot create string output stream");
     return eintern(env, "nil");

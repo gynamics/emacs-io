@@ -32,17 +32,19 @@ typedef bool      (*stream_listen_fn)(cl_stream_t *s);
 typedef void      (*stream_destroy_fn)(cl_stream_t *s);
 typedef bool      (*stream_direct_fn)(cl_stream_t *s, const void **addr, size_t *len);
 typedef void      (*stream_advance_fn)(cl_stream_t *s, ptrdiff_t n);
+typedef ptrdiff_t (*stream_write_string_fn)(emacs_env *env, cl_stream_t *s, emacs_value str);
 
 struct cl_stream_ops {
-  stream_read_fn     read;
-  stream_write_fn    write;
-  stream_close_fn    close;
-  stream_flush_fn    flush;
-  stream_finish_fn   finish;
-  stream_listen_fn   listen;
-  stream_destroy_fn  destroy;
-  stream_direct_fn   direct;
-  stream_advance_fn  advance;
+  stream_read_fn         read;
+  stream_write_fn        write;
+  stream_close_fn        close;
+  stream_flush_fn        flush;
+  stream_finish_fn       finish;
+  stream_listen_fn       listen;
+  stream_destroy_fn      destroy;
+  stream_direct_fn       direct;
+  stream_advance_fn      advance;
+  stream_write_string_fn write_string;
 };
 
 /* ── core stream object ──────────────────────────────────────────────── */
@@ -136,12 +138,13 @@ typedef struct {
 cl_stream_t *stream_create_fd(int fd, bool owns_fd, unsigned flags);
 cl_stream_t *stream_create_mmap(int fd, bool owns_fd);
 cl_stream_t *stream_create_string_input(const char *data, size_t len);
-cl_stream_t *stream_create_string_output(void);
+cl_stream_t *stream_create_string_output(size_t hint_size);
 cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
                                         ptrdiff_t start, ptrdiff_t end);
 
 ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n);
 ptrdiff_t stream_write(cl_stream_t *s, const void *buf, ptrdiff_t n);
+ptrdiff_t stream_write_string(emacs_env *env, cl_stream_t *s, emacs_value str);
 int       stream_close(cl_stream_t *s);
 int       stream_flush(cl_stream_t *s);
 int       stream_finish(cl_stream_t *s);

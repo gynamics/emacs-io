@@ -100,3 +100,35 @@ void stream_advance(cl_stream_t *s, ptrdiff_t n) {
   s->ops->advance(s, n);
   UNLOCK(s);
 }
+
+ptrdiff_t stream_write_string(emacs_env *env, cl_stream_t *s, emacs_value str) {
+  if (!s || !env) return 0;
+  if (!atomic_load(&s->open)) return 0;
+
+  /* use optimized path if available */
+  if (s->ops && s->ops->write_string) {
+    LOCK(s);
+    ptrdiff_t r = s->ops->write_string(env, s, str);
+    UNLOCK(s);
+    return r;
+  }
+
+  /* fallback: extract C string then write bytes */
+  ptrdiff_t slen = 0;
+  if (!env->copy_string_contents(env, str, NULL, &slen)) return 0;
+  if (slen == 0) return 0;
+
+  unsigned char *buf = malloc((size_t)slen);
+  if (!buf) return -1;
+
+  ptrdiff_t len = slen;
+  if (!env->copy_string_contents(env, str, (char *)buf, &len)) {
+    free(buf);
+    return -1;
+  }
+  len--; /* exclude null */
+
+  ptrdiff_t r = stream_write(s, buf, len);
+  free(buf);
+  return r;
+}

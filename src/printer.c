@@ -59,28 +59,33 @@ emacs_value Fwrite_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   cl_stream_t *s = get_output_stream(env, args, nargs, 1);
+  write_check(env, s, "cl-write-string");
 
+  /* check if start/end are present */
+  bool has_start = false, has_end = false;
+  ptrdiff_t start = 0, end = 0;
+  for (ptrdiff_t i = 2; i < nargs - 1; i += 2) {
+    if (kw_eq(env, args[i], ":start")) { start = eint_extract(env, args[i + 1]); has_start = true; }
+    if (kw_eq(env, args[i], ":end"))   { end = eint_extract(env, args[i + 1]); has_end = true; }
+  }
+
+  /* fast path: write full string without intermediate allocation */
+  if (!has_start && !has_end) {
+    stream_write_string(env, s, args[0]);
+    return args[0];
+  }
+
+  /* slow path: substring */
   ptrdiff_t slen = 0;
   char *str = estring_alloc(env, args[0], &slen);
   if (!str) { signal_error(env, "Cannot extract string"); return eintern(env, "nil"); }
 
-  ptrdiff_t start = 0;
-  ptrdiff_t end = slen;
-
-  /* parse &key start end */
-  for (ptrdiff_t i = 2; i < nargs; i += 2) {
-    if (i + 1 >= nargs) break;
-    if (kw_eq(env, args[i], ":start"))
-      start = eint_extract(env, args[i + 1]);
-    else if (kw_eq(env, args[i], ":end"))
-      end = eint_extract(env, args[i + 1]);
-  }
-
+  if (!has_start) start = 0;
+  if (!has_end) end = slen;
   if (start < 0) start = 0;
   if (end > slen) end = slen;
   if (end <= start) { free(str); return args[0]; }
 
-  write_check(env, s, "cl-write-string");
   stream_write(s, str + start, end - start);
   free(str);
   return args[0];
