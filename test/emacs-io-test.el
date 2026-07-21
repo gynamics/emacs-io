@@ -622,5 +622,83 @@
       (cl-close s)))
   (should t))
 
+;; ── File Position ────────────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-file-position-string-input ()
+  "Test cl-file-position on string input stream."
+  (emacs-io-test--with-string-input "abcdef"
+    (should (equal (cl-file-position stream) 0))
+    (cl-read-char stream) ;; 'a'
+    (should (equal (cl-file-position stream) 1))
+    (cl-read-char stream) ;; 'b'
+    (cl-read-char stream) ;; 'c'
+    (should (equal (cl-file-position stream) 3))
+    ;; set back to 1
+    (should (cl-file-position stream 1))
+    (should (equal (cl-file-position stream) 1))
+    (should (equal (cl-read-char stream) ?b))))
+
+(ert-deftest emacs-io-test-file-position-string-input-out-of-range ()
+  "Test cl-file-position set out of range returns nil."
+  (emacs-io-test--with-string-input "abc"
+    (should-not (cl-file-position stream 10))
+    (should (equal (cl-file-position stream) 0))))
+
+(ert-deftest emacs-io-test-file-position-string-output ()
+  "Test cl-file-position on string output stream (accumulated length)."
+  (let ((s (cl-make-string-output-stream)))
+    (should (equal (cl-file-position s) 0))
+    (cl-write-string "hello" s)
+    (should (equal (cl-file-position s) 5))
+    (cl-write-string " world" s)
+    (should (equal (cl-file-position s) 11))
+    (cl-close s)))
+
+(ert-deftest emacs-io-test-file-position-file-read ()
+  "Test cl-file-position on a file stream (read side)."
+  (emacs-io-test--with-temp-file f
+    (with-temp-buffer (insert "0123456789") (write-region (point-min) (point-max) f nil 'silent))
+    (let ((s (cl-open f :direction :input)))
+      (should (equal (cl-file-position s) 0))
+      (cl-read-char s) ;; '0'
+      (should (equal (cl-file-position s) 1))
+      (cl-read-string 4 s) ;; '1234'
+      (should (equal (cl-file-position s) 5))
+      ;; seek back to 2
+      (should (cl-file-position s 2))
+      (should (equal (cl-file-position s) 2))
+      (should (equal (cl-read-char s) ?2))
+      (cl-close s))))
+
+(ert-deftest emacs-io-test-file-position-file-write ()
+  "Test cl-file-position on a file output stream."
+  (emacs-io-test--with-temp-file f
+    (let ((s (cl-open f :direction :output :if-exists :supersede)))
+      (should (equal (cl-file-position s) 0))
+      (cl-write-string "abc" s)
+      (should (equal (cl-file-position s) 3))
+      (cl-write-string "def" s)
+      (should (equal (cl-file-position s) 6))
+      (cl-close s))
+    ;; verify content
+    (with-temp-buffer
+      (insert-file-contents f)
+      (should (equal (buffer-string) "abcdef")))))
+
+(ert-deftest emacs-io-test-file-position-set-on-output ()
+  "Test cl-file-position set on output stream and write at new position."
+  (emacs-io-test--with-temp-file f
+    (let ((s (cl-open f :direction :output :if-exists :supersede)))
+      (cl-write-string "abcdef" s)
+      (should (equal (cl-file-position s) 6))
+      ;; seek back and overwrite
+      (should (cl-file-position s 3))
+      (cl-write-string "XYZ" s)
+      (should (equal (cl-file-position s) 6))
+      (cl-close s))
+    (with-temp-buffer
+      (insert-file-contents f)
+      (should (equal (buffer-string) "abcXYZ")))))
+
 (provide 'emacs-io-test)
 ;;; emacs-io-test.el ends here

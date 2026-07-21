@@ -21,7 +21,7 @@ ring buffers, zero copy within string streams, and no hook machinery.
 ```
 $ make             # → emacs-io.so
 $ make verify      # confirm module loads in Emacs
-$ make test        # 77 unit tests
+$ make test        # 83 unit tests
 $ make bench       # 12 performance benchmarks
 ```
 
@@ -45,7 +45,7 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 ## API
 
 ### Stream lifecycle
-`cl-open` `cl-close` `cl-open-stream-p` `cl-input-stream-p` `cl-output-stream-p` `cl-stream-element-type` `cl-file-regular-p` `cl-file-tty-p`
+`cl-open` `cl-close` `cl-open-stream-p` `cl-input-stream-p` `cl-output-stream-p` `cl-stream-element-type` `cl-file-position` `cl-file-regular-p` `cl-file-tty-p`
 
 ### String streams
 `cl-make-string-input-stream` `cl-make-string-output-stream` `cl-get-output-stream-string`

@@ -141,3 +141,21 @@ ptrdiff_t stream_write_string(emacs_env *env, cl_stream_t *s, emacs_value str) {
   free(buf);
   return r;
 }
+
+ptrdiff_t stream_file_position(cl_stream_t *s) {
+  if (!s || !s->ops || !s->ops->file_position) return -1;
+  if (!atomic_load(&s->open)) return -1;
+  LOCK(s);
+  ptrdiff_t r = s->ops->file_position(s);
+  UNLOCK(s);
+  return r;
+}
+
+bool stream_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
+  if (!s || pos < 0 || !s->ops || !s->ops->set_file_position) return false;
+  if (!atomic_load(&s->open)) return false;
+  LOCK(s);
+  bool r = s->ops->set_file_position(s, pos);
+  UNLOCK(s);
+  return r;
+}

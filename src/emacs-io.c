@@ -76,6 +76,8 @@ extern emacs_value Ffile_regular_p(emacs_env *env, ptrdiff_t nargs,
                                     emacs_value *args, void *data);
 extern emacs_value Ffile_tty_p(emacs_env *env, ptrdiff_t nargs,
                                 emacs_value *args, void *data);
+extern emacs_value Ffile_position(emacs_env *env, ptrdiff_t nargs,
+                                  emacs_value *args, void *data);
 
 /* lispio.c */
 extern emacs_value Fread(emacs_env *env, ptrdiff_t nargs,
@@ -352,6 +354,16 @@ int emacs_module_init(struct emacs_runtime *runtime) {
   defun(env, "cl-file-tty-p", Ffile_tty_p, 1, 1,
         "Return t if STREAM is connected to a terminal (isatty).\n"
         "\n(fn STREAM)", NULL);
+
+  defun(env, "cl-file-position", Ffile_position, 1, 3,
+        "Return the current position of STREAM, or set it.\n"
+        "\n"
+        "With one argument, return the current position as a\n"
+        "non-negative integer, or nil if the stream does not support\n"
+        "position queries.\n"
+        "With a second argument POSITION, set the position to that\n"
+        "value and return t on success, nil on failure.\n"
+        "\n(fn STREAM &optional POSITION)", NULL);
 
   /* ── Lisp reader / printer ───────────────────────────────────────── */
   defun(env, "cl-read", Fread, 0, 4,

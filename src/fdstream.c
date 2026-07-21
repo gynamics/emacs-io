@@ -17,6 +17,8 @@ static bool      fds_listen(cl_stream_t *s);
 static void      fds_destroy(cl_stream_t *s);
 static void      fds_clear_input(cl_stream_t *s);
 static void      fds_clear_output(cl_stream_t *s);
+static ptrdiff_t fds_file_position(cl_stream_t *s);
+static bool      fds_set_file_position(cl_stream_t *s, ptrdiff_t pos);
 
 static const cl_stream_ops_t fd_stream_ops = {
   .read         = fds_read,
@@ -28,6 +30,8 @@ static const cl_stream_ops_t fd_stream_ops = {
   .destroy      = fds_destroy,
   .clear_input  = fds_clear_input,
   .clear_output = fds_clear_output,
+  .file_position = fds_file_position,
+  .set_file_position = fds_set_file_position,
 };
 
 /* ── create / destroy ────────────────────────────────────────────────── */
@@ -283,4 +287,26 @@ static void fds_clear_input(cl_stream_t *s) {
 static void fds_clear_output(cl_stream_t *s) {
   fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
   if (fi) fi->wlen = 0;
+}
+
+static ptrdiff_t fds_file_position(cl_stream_t *s) {
+  fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
+  if (!fi || fi->fd < 0) return -1;
+  /* flush pending writes so lseek reflects the true file offset */
+  if (fi->wlen > 0) fds_flush(s);
+  off_t pos = lseek(fi->fd, 0, SEEK_CUR);
+  if (pos < 0) return -1;
+  /* adjust for unread bytes in the read buffer */
+  if (fi->rpos < fi->rlen)
+    pos -= (off_t)(fi->rlen - fi->rpos);
+  return (ptrdiff_t)pos;
+}
+
+static bool fds_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
+  fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
+  if (!fi || fi->fd < 0 || pos < 0) return false;
+  /* flush write buffer and discard read buffer before seeking */
+  if (fi->wlen > 0) fds_flush(s);
+  fi->rpos = 0; fi->rlen = 0;
+  return lseek(fi->fd, (off_t)pos, SEEK_SET) >= 0;
 }

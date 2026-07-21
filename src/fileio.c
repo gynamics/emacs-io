@@ -160,3 +160,35 @@ emacs_value Ffile_tty_p(emacs_env *env, ptrdiff_t nargs,
   cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
   return stream_is_tty(s) ? eintern(env, "t") : eintern(env, "nil");
 }
+
+/* ── cl-file-position ────────────────────────────────────────────────── */
+
+emacs_value Ffile_position(emacs_env *env, ptrdiff_t nargs,
+                            emacs_value *args, void *data) {
+  (void)data;
+  /* (cl-file-position stream &optional position) */
+  if (nargs < 1) {
+    signal_error(env, "cl-file-position requires 1 argument");
+    return eintern(env, "nil");
+  }
+
+  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
+  if (!s || !stream_is_open(s)) {
+    signal_error(env, "Stream is closed");
+    return eintern(env, "nil");
+  }
+
+  if (nargs >= 2 && env->is_not_nil(env, args[1])) {
+    ptrdiff_t pos = (ptrdiff_t)eint_extract(env, args[1]);
+    if (pos < 0) {
+      signal_error(env, "cl-file-position: position must be non-negative");
+      return eintern(env, "nil");
+    }
+    return stream_set_file_position(s, pos)
+           ? eintern(env, "t") : eintern(env, "nil");
+  }
+
+  ptrdiff_t pos = stream_file_position(s);
+  if (pos < 0) return eintern(env, "nil");
+  return eint(env, (intmax_t)pos);
+}
