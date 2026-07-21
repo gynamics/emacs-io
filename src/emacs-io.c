@@ -24,6 +24,8 @@ extern emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs,
                                    emacs_value *args, void *data);
 extern emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs,
                                  emacs_value *args, void *data);
+extern emacs_value Fread_chunk(emacs_env *env, ptrdiff_t nargs,
+                                emacs_value *args, void *data);
 
 /* printer.c */
 extern emacs_value Fwrite_char(emacs_env *env, ptrdiff_t nargs,
@@ -48,6 +50,8 @@ extern emacs_value Fclear_input(emacs_env *env, ptrdiff_t nargs,
                                  emacs_value *args, void *data);
 extern emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs,
                                     emacs_value *args, void *data);
+extern emacs_value Fwrite_strings(emacs_env *env, ptrdiff_t nargs,
+                                   emacs_value *args, void *data);
 
 /* fileio.c */
 extern emacs_value Fopen(emacs_env *env, ptrdiff_t nargs,
@@ -172,7 +176,16 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "If EOF-ERROR-P is nil and end of file is reached, return EOF-VALUE.\n"
         "Use this for bulk reads; it avoids per-element overhead of\n"
         "`cl-read-sequence' for large data.\n"
-        "\n(fn N STREAM &optional EOF-ERROR-P EOF-VALUE)", NULL);
+         "\n(fn N STREAM &optional EOF-ERROR-P EOF-VALUE)", NULL);
+
+  defun(env, "cl-read-chunk", Fread_chunk, 1, 3,
+        "Read up to MAX-BYTES (default 65536) from STREAM.\n"
+        "\n"
+        "Returns a cons (CHUNK . EOF-P) where CHUNK is a unibyte string\n"
+        "and EOF-P is non-nil if end of file was reached.\n"
+        "Use this for incremental bulk reads; it avoids the per-byte\n"
+        "overhead of `cl-listen' + `cl-read-char' loops.\n"
+        "\n(fn STREAM &optional MAX-BYTES)", NULL);
 
   /* ── printer ─────────────────────────────────────────────────────── */
   defun(env, "cl-write-char", Fwrite_char, 1, 2,
@@ -256,7 +269,16 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "SEQUENCE must be a vector.  Writing starts at :START (default 0)\n"
         "and stops at :END (default the length of SEQUENCE).\n"
         "Returns SEQUENCE.\n"
-        "\n(fn SEQUENCE STREAM &key START END)", NULL);
+         "\n(fn SEQUENCE STREAM &key START END)", NULL);
+
+  defun(env, "cl-write-strings", Fwrite_strings, 1, 3,
+        "Write a list of strings to STREAM in one module call.\n"
+        "\n"
+        "STRINGS is a Lisp list of strings.  STREAM defaults to\n"
+        "`*standard-output*'.  Returns STRINGS.\n"
+        "Use this to batch multiple writes and amortize the per-call\n"
+        "module-function crossing overhead.\n"
+        "\n(fn STRINGS &optional STREAM)", NULL);
 
   /* ── file I/O and streams ────────────────────────────────────────── */
   defun(env, "cl-open", Fopen, 1, 6,

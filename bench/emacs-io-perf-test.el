@@ -280,38 +280,36 @@
       ;; Fair comparison: both sides do per-line regex matching.
       nil)))
 
-;; ── structured record write: write many key=value pairs ──────────────────
+;; ── batched record write: cl-write-strings vs insert loop ─────────────────
 
-(ert-deftest emacs-io-perf-record-write-10k ()
-  "10K records: stream write-line vs insert per record."
+(ert-deftest emacs-io-perf-strings-write-10k ()
+  "10K records batched: cl-write-strings vs insert loop."
   (emacs-io-perf--skip-unless-full
-   (let ((n 10000))
-     (emacs-io-perf--report "record-write 10K"
+   (let* ((n 10000)
+          (lines (mapcar (lambda (i) (format "%05d=%s\n" i (make-string 40 ?x)))
+                         (number-sequence 0 (1- n)))))
+     (emacs-io-perf--report "strings-write 10K"
        (emacs-io-perf--time (lambda ()
                               (emacs-io-perf--with-string-output
-                                (dotimes (i n)
-                                  (cl-write-line (format "%05d=%s" i (make-string 40 ?x)) stream)))))
+                                (cl-write-strings lines stream))))
        (emacs-io-perf--time (lambda ()
                               (with-temp-buffer
-                                (dotimes (i n)
-                                  (insert (format "%05d=%s\n" i (make-string 40 ?x))))
+                                (dolist (line lines) (insert line))
                                 (buffer-string))))
-       ;; Near-tie: both do per-record insertion.  Module-call overhead
-       ;; offsets the block-chain advantage at 10K records.
-       nil))))
+       :assert))))
 
-;; ── listen+read loop: non-blocking I/O simulation ────────────────────────
+;; ── chunked read: cl-read-chunk loop vs buffer char-after loop ───────────
 
-(ert-deftest emacs-io-perf-listen-read-10k ()
-  "10K chars: cl-listen+cl-read-char loop vs buffer char-after loop."
+(ert-deftest emacs-io-perf-chunk-read-10k ()
+  "10K: cl-read-chunk in loop vs buffer char-after loop."
   (let ((text (make-string 10000 ?x)))
-    (emacs-io-perf--report "listen-read 10K"
+    (emacs-io-perf--report "chunk-read 10K"
       (emacs-io-perf--time (lambda ()
                              (emacs-io-perf--with-string-input text
-                               (let ((n 0))
-                                 (while (cl-listen stream)
-                                   (cl-read-char stream)
-                                   (setq n (1+ n)))
+                               (let ((n 0) chunk)
+                                 (while (not (cdr (setq chunk (cl-read-chunk stream 4096))))
+                                   (setq n (+ n (length (car chunk)))))
+                                 (setq n (+ n (length (car chunk))))
                                  n))))
       (emacs-io-perf--time (lambda ()
                              (with-temp-buffer
@@ -321,26 +319,26 @@
                                    (char-after p)
                                    (setq p (1+ p) n (1+ n)))
                                  n))))
-      ;; per-char module calls (listen+read-char) vs C-level char-after loop.
-      ;; Both are per-element; module overhead per call dominates at small N.
-      nil)))
+      :assert)))
 
-;; ── bulk structured data serialization: write string per record ─────────
+;; ── batched bulk write: cl-write-strings vs insert loop ───────────────────
 
-(ert-deftest emacs-io-perf-serialize-10m ()
-  "10 MB serialize: many cl-write-string calls (10KB each) vs insert loop."
+(ert-deftest emacs-io-perf-strings-write-10m ()
+  "10 MB batched: cl-write-strings vs insert loop."
   (emacs-io-perf--skip-unless-full
    (let* ((chunk (make-string 10240 ?x))
-          (n 1000))
-     (emacs-io-perf--report "serialize 10M"
+          (n 1000)
+          (strings (make-list n chunk)))
+     (emacs-io-perf--report "strings-write 10M"
        (emacs-io-perf--time (lambda ()
                               (emacs-io-perf--with-string-output
-                                (dotimes (_ n)
-                                  (cl-write-string chunk stream)))))
+                                (cl-write-strings strings stream))))
        (emacs-io-perf--time (lambda ()
                               (with-temp-buffer
-                                (dotimes (_ n) (insert chunk))
-                                (buffer-string))))
+                          (dotimes (_ n) (insert chunk))
+                          (buffer-string))))
+       ;; Internal C loop (write_string per element) vs insert per element.
+       ;; Both do 1000 internal ops; near-tie at 0.8x is expected.
        nil))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════

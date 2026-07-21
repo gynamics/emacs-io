@@ -270,3 +270,46 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   free(buf);
   return result;
 }
+
+/* ── cl-read-chunk ─────────────────────────────────────────────────────── */
+
+emacs_value Fread_chunk(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                         void *data) {
+  (void)data;
+  /* (cl-read-chunk stream &optional max-bytes)
+     Read up to MAX-BYTES (default 64KB), return (CHUNK . EOF-P). */
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-input*");
+  check_open(env, s, "cl-read-chunk");
+
+  ptrdiff_t max = 65536;
+  if (nargs >= 2) max = eint_extract(env, args[1]);
+  if (max <= 0) max = 65536;
+
+  /* try zero-copy via direct mapping */
+  const void *daddr = NULL;
+  size_t dlen = 0;
+  if (stream_direct(s, &daddr, &dlen)) {
+    size_t n = (size_t)max < dlen ? (size_t)max : dlen;
+    emacs_value chunk = env->make_unibyte_string(env, (const char *)daddr,
+                                                  (ptrdiff_t)n);
+    stream_advance(s, (ptrdiff_t)n);
+    emacs_value eof = (dlen - n == 0) ? eintern(env, "t") : eintern(env, "nil");
+    emacs_value pair_args[2];
+    pair_args[0] = chunk;
+    pair_args[1] = eof;
+    return efuncall(env, "cons", 2, pair_args);
+  }
+
+  unsigned char *buf = malloc((size_t)max);
+  if (!buf) { signal_error(env, "Memory allocation failed"); return eintern(env, "nil"); }
+
+  ptrdiff_t r = stream_read(s, buf, max);
+  emacs_value chunk = env->make_unibyte_string(env, (const char *)buf, r > 0 ? r : 0);
+  free(buf);
+
+  emacs_value eof = (r <= 0) ? eintern(env, "t") : eintern(env, "nil");
+  emacs_value pair_args[2];
+  pair_args[0] = chunk;
+  pair_args[1] = eof;
+  return efuncall(env, "cons", 2, pair_args);
+}
