@@ -45,27 +45,144 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 ## API
 
 ### Stream lifecycle
-`cl-open` `cl-close` `cl-open-stream-p` `cl-input-stream-p` `cl-output-stream-p` `cl-stream-element-type` `cl-file-position` `cl-file-regular-p` `cl-file-tty-p`
+
+| Function | Signature | Description |
+|---|---|---|
+| `cl-open` | `(cl-open filename &key direction if-exists element-type)` | Open a file, return a stream |
+| `cl-close` | `(cl-close stream)` | Close the stream |
+| `cl-open-stream-p` | `(cl-open-stream-p object)` | Return t if object is an open stream |
+| `cl-input-stream-p` | `(cl-input-stream-p stream)` | Return t if stream supports input |
+| `cl-output-stream-p` | `(cl-output-stream-p stream)` | Return t if stream supports output |
+| `cl-stream-element-type` | `(cl-stream-element-type stream)` | Return the type of elements read/written |
+| `cl-file-position` | `(cl-file-position stream &optional position)` | Return or set the current position |
+| `cl-file-regular-p` | `(cl-file-regular-p stream)` | Return t if stream is a regular file |
+| `cl-file-tty-p` | `(cl-file-tty-p stream)` | Return t if stream is a terminal |
 
 ### String streams
-`cl-make-string-input-stream` `cl-make-string-output-stream` `cl-get-output-stream-string`
+
+| Function | Signature | Description |
+|---|---|---|
+| `cl-make-string-input-stream` | `(cl-make-string-input-stream string &optional start end)` | Create an input stream from a string |
+| `cl-make-string-output-stream` | `(cl-make-string-output-stream &key element-type size)` | Create an output stream that accumulates in a string |
+| `cl-get-output-stream-string` | `(cl-get-output-stream-string stream)` | Return the accumulated output as a string |
+| `cl-make-buffer-input-stream` | `(cl-make-buffer-input-stream buffer &key start end)` | Create an input stream from a buffer's text |
 
 ### Character I/O
-`cl-read-char` `cl-read-line` `cl-read-byte` `cl-peek-char` `cl-unread-char` `cl-listen`
-`cl-write-char` `cl-write-string` `cl-write-line` `cl-write-byte`
-`cl-terpri` `cl-fresh-line`
+
+| Function | Signature | Description |
+|---|---|---|
+| `cl-read-char` | `(cl-read-char &optional stream eof-error-p eof-value)` | Read and return one character |
+| `cl-read-line` | `(cl-read-line &optional stream eof-error-p eof-value)` | Read a line, returns `(line . missing-newline-p)` |
+| `cl-read-byte` | `(cl-read-byte stream &optional eof-error-p eof-value)` | Read and return one byte |
+| `cl-peek-char` | `(cl-peek-char &optional peek-type stream ...)` | Preview the next character without consuming it |
+| `cl-unread-char` | `(cl-unread-char character &optional stream)` | Push a character back onto the stream |
+| `cl-listen` | `(cl-listen &optional stream)` | Return t if a character is available to read |
+| `cl-write-char` | `(cl-write-char character &optional stream)` | Write a character to the stream |
+| `cl-write-string` | `(cl-write-string string &optional stream &key start end)` | Write a string to the stream |
+| `cl-write-line` | `(cl-write-line string &optional stream &key start end)` | Write a string followed by a newline |
+| `cl-write-byte` | `(cl-write-byte byte stream)` | Write a byte to the stream |
+| `cl-terpri` | `(cl-terpri &optional stream)` | Output a newline |
+| `cl-fresh-line` | `(cl-fresh-line &optional stream)` | Output a newline if not at the start of a line |
 
 ### Bulk I/O
-`cl-read-sequence` `cl-write-sequence` `cl-read-string` `cl-read-chunk`
+
+| Function | Signature | Description |
+|---|---|---|
+| `cl-read-sequence` | `(cl-read-sequence sequence stream &key start end)` | Read elements into a vector, returns index of first unfilled element |
+| `cl-write-sequence` | `(cl-write-sequence sequence stream &key start end)` | Write elements of a vector to the stream |
+| `cl-read-string` | `(cl-read-string n stream &optional eof-error-p eof-value)` | Read up to N bytes, return a unibyte string |
+| `cl-read-chunk` | `(cl-read-chunk stream &optional max-bytes)` | Read up to MAX-BYTES, return `(chunk . eof-p)` |
 
 ### Stream control
-`cl-finish-output` (fsync) `cl-force-output` (fflush) `cl-clear-output` `cl-clear-input`
 
-### Lisp reader
-`cl-read` `cl-read-from-string`
+| Function | Signature | Description |
+|---|---|---|
+| `cl-finish-output` | `(cl-finish-output &optional stream)` | fsync(2) the stream — ensure data reaches disk |
+| `cl-force-output` | `(cl-force-output &optional stream)` | fflush(3) the stream — empty internal buffers |
+| `cl-clear-output` | `(cl-clear-output &optional stream)` | Discard pending output |
+| `cl-clear-input` | `(cl-clear-input &optional stream)` | Discard pending input |
 
-### Lisp printer
-`cl-write` `cl-prin1` `cl-princ` `cl-print` `cl-prin1-to-string` `cl-princ-to-string`
+### Lisp reader / printer
+
+| Function | Signature | Description |
+|---|---|---|
+| `cl-read` | `(cl-read &optional stream eof-error-p eof-value recursive-p)` | Read one Lisp object from the stream |
+| `cl-read-from-string` | `(cl-read-from-string string &optional eof-error-p eof-value &key start end)` | Read one Lisp object from a string |
+| `cl-write` | `(cl-write object &key stream ...)` | Write a Lisp object to the stream |
+| `cl-prin1` | `(cl-prin1 object &optional stream)` | Write an object in a form readable by `cl-read` |
+| `cl-princ` | `(cl-princ object &optional stream)` | Write an object in human-readable form |
+| `cl-print` | `(cl-print object &optional stream)` | Write a newline, then the object, then a space |
+| `cl-prin1-to-string` | `(cl-prin1-to-string object)` | Return a string of the object, readable by `cl-read` |
+| `cl-princ-to-string` | `(cl-princ-to-string object)` | Return a human-readable string of the object |
+
+## Practical uses
+
+### Log processing without temp buffers
+
+```elisp
+(let ((s (cl-open "/var/log/app.log" :direction :input))
+      (out (cl-open "/tmp/errors.log" :direction :output :if-exists :supersede)))
+  (while (cl-listen s)
+    (let ((line (cl-read-line s nil nil)))
+      (when (and (car line) (string-match "ERROR" (car line)))
+        (cl-write-line (car line) out))))
+  (cl-close s)
+  (cl-close out))
+```
+
+### Fast sequence encoding
+
+```elisp
+(let* ((v (make-vector 100000 ?x))
+       (s (cl-make-string-output-stream :size (* 100000 8))))
+  (cl-write-sequence v s)
+  (cl-get-output-stream-string s))
+```
+
+### File read/write
+
+```elisp
+(let ((s (cl-open "/tmp/data.bin" :direction :output :if-exists :supersede)))
+  (cl-write-string (make-string (* 10 1024 1024) ?x) s)
+  (cl-close s))
+
+(let ((s (cl-open "/tmp/data.bin" :direction :input)))
+  (cl-read-string (* 10 1024 1024) s)
+  (cl-close s))
+```
+
+### Chunked streaming
+
+```elisp
+(let ((s (cl-open "/tmp/large.json" :direction :input)))
+  (while t
+    (let ((pair (cl-read-chunk s 65536)))
+      (process-chunk (car pair))
+      (when (cdr pair) (cl-close s) (cl-return)))))
+```
+
+### Non-blocking pipe I/O
+
+```elisp
+(let ((s (cl-open "/tmp/worker.pipe" :direction :input)))
+  (while t
+    (when (cl-listen s)
+      (let ((line (cl-read-line s nil nil)))
+        (when (car line)
+          (process-message (car line)))))))
+```
+
+### Binary I/O
+
+```elisp
+(let ((in  (cl-open "/tmp/binary.dat" :direction :input))
+      (out (cl-open "/tmp/copy.dat" :direction :output :if-exists :supersede)))
+  (while t
+    (let ((byte (cl-read-byte in nil :eof)))
+      (if (eq byte :eof) (cl-return))
+      (cl-write-byte byte out)))
+  (cl-close in) (cl-close out))
+```
 
 ## Performance
 
@@ -105,7 +222,7 @@ src/strstream.c  — string-input (cursor), string-output (block-chain)
 src/bufstream.c  — buffer input via buffer-substring-no-properties, 64 KB chunks
 src/reader.c     — cl-read-char, cl-read-line (CRLF-aware), bulk chunk read
 src/printer.c    — cl-write-*, terpri, fresh-line, flush/force/finish/clear
-src/fileio.c     — cl-open, cl-close, string/buffer constructors, predicates
+src/fileio.c     — cl-open, cl-close, string/buffer constructors, predicates, file-position
 src/lispio.c     — cl-read (→ read-from-string), cl-prin1/princ/print
 src/stdstream.c  — standard stream variable init
 src/util.c/h     — emacs_env wrappers, defun, kw_eq, strbuf, error signaling
