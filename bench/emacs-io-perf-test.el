@@ -303,29 +303,30 @@
 
 ;; ── chunked read: cl-read-chunk vs buffer-substring, same chunk size ──────
 
-(ert-deftest emacs-io-perf-chunk-read-10k ()
-  "10K: cl-read-chunk vs buffer-substring in 4KB chunks on both sides."
-  (let* ((text (make-string 10000 ?x))
-         (chunk 4096))
-    (emacs-io-perf--report "chunk-read 10K"
-      (emacs-io-perf--time (lambda ()
-                             (emacs-io-perf--with-string-input text
-                               (let ((n 0) pair)
-                                 (while (not (cdr (setq pair (cl-read-chunk stream chunk))))
-                                   (setq n (+ n (length (car pair)))))
-                                 (setq n (+ n (length (car pair))))
-                                 n))))
-      (emacs-io-perf--time (lambda ()
-                             (with-temp-buffer
-                               (insert text)
-                               (let ((n 0) (pos (point-min)) (end (point-max)))
-                                 (while (< pos end)
-                                   (let ((to (min (+ pos chunk) end)))
-                                     (buffer-substring pos to)
-                                     (setq n (+ n (- to pos)))
-                                     (setq pos to)))
-                                 n))))
-      :assert)))
+(ert-deftest emacs-io-perf-chunk-read-1m ()
+  "1 MB: cl-read-chunk vs buffer-substring in 4KB chunks on both sides."
+  (emacs-io-perf--skip-unless-full
+   (let* ((text (make-string (* 1024 1024) ?x))
+          (chunk 4096))
+     (emacs-io-perf--report "chunk-read 1M"
+       (emacs-io-perf--time (lambda ()
+                              (emacs-io-perf--with-string-input text
+                                (let ((n 0) pair)
+                                  (while (not (cdr (setq pair (cl-read-chunk stream chunk))))
+                                    (setq n (+ n (length (car pair)))))
+                                  (setq n (+ n (length (car pair))))
+                                  n))))
+       (emacs-io-perf--time (lambda ()
+                              (with-temp-buffer
+                                (insert text)
+                                (let ((n 0) (pos (point-min)) (end (point-max)))
+                                  (while (< pos end)
+                                    (let ((to (min (+ pos chunk) end)))
+                                      (buffer-substring pos to)
+                                      (setq n (+ n (- to pos)))
+                                      (setq pos to)))
+                                  n))))
+       :assert))))
 
 ;; ── batched bulk write: cl-write-strings vs insert loop ───────────────────
 
