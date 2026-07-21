@@ -70,9 +70,8 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       unsigned char next;
       ptrdiff_t r2 = stream_read(s, &next, 1);
       if (r2 > 0 && next == '\n') { saw_newline = true; break; }
-      /* put back \r since we already consumed it — approximate */
-      strbuf_append_char(sb, '\r');
-      if (r2 > 0) { /* push the next char back */ }
+      /* bare \r — push back the peeked char if present */
+      if (r2 > 0) stream_unread(s, next);
       saw_newline = true;
       break;
     }
@@ -145,8 +144,8 @@ emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   if (r <= 0) {
     return eintern(env, "nil");
   }
-  /* We consumed the char — in a real pushback, we'd push it back.
-     For now, just return the value. */
+  /* push it back */
+  stream_unread(s, ch);
   return eint(env, ch);
 }
 
@@ -157,9 +156,12 @@ emacs_value Funread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   (void)data;
   (void)nargs;
   (void)args;
-  /* (cl-unread-char char &optional stream) */
-  /* Our core stream lacks pushback; signal an error for now. */
-  signal_error(env, "cl-unread-char: pushback not implemented on core stream");
+  if (nargs < 1) { signal_error(env, "cl-unread-char requires at least 1 argument"); return eintern(env, "nil"); }
+  cl_stream_t *s = get_stream_or_default(env, args, nargs,
+                                          (nargs >= 2) ? 1 : 0,
+                                          "*standard-input*");
+  intmax_t ch = eint_extract(env, args[0]);
+  stream_unread(s, (int)ch);
   return eintern(env, "nil");
 }
 

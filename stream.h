@@ -54,6 +54,12 @@ struct cl_stream {
   pthread_mutex_t        mutex;
   unsigned               flags;
   _Atomic bool           open;
+
+  /* pushback ring buffer for unread */
+  int                    pushback_chars[16];
+  int                    pushback_head;   /* next to read */
+  int                    pushback_tail;   /* next to write */
+  int                    column;          /* column tracking */
 };
 
 /* ── concrete impl structs ───────────────────────────────────────────── */
@@ -115,6 +121,7 @@ int       stream_close(cl_stream_t *s);
 int       stream_flush(cl_stream_t *s);
 int       stream_finish(cl_stream_t *s);
 bool      stream_listen(cl_stream_t *s);
+void      stream_unread(cl_stream_t *s, int ch);
 
 static inline bool stream_is_open(cl_stream_t *s)
   { return s != NULL && atomic_load(&s->open); }

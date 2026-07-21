@@ -100,8 +100,7 @@
   "Test peeking at a character."
   (emacs-io-test--with-string-input "abc"
     (should (equal (cl-peek-char nil stream) ?a))
-    ;; Note: without pushback, peek consumes the char.
-    ;; This test documents current behavior.
+    (should (equal (cl-read-char stream) ?a))
     (should (equal (cl-read-char stream) ?b))))
 
 (ert-deftest emacs-io-test-string-input-listen ()
