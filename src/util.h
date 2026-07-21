@@ -5,6 +5,11 @@
 #include "stream.h"
 #include <stddef.h>
 
+/* ── runtime pointer (set once at init) ───────────────────────────────── */
+
+extern struct emacs_runtime *cl_rt;
+emacs_env *cl_env(void);
+
 /* ── emacs_env helpers ────────────────────────────────────────────────── */
 
 emacs_value eintern(emacs_env *env, const char *name);
@@ -57,7 +62,7 @@ bool kw_eq(emacs_env *env, emacs_value kw, const char *name);
 
 strbuf_t *strbuf_create(size_t initial_cap);
 void      strbuf_free(strbuf_t *sb);
-void      strbuf_append(strbuf_t *sb, const char *s, ptrdiff_t len);
+bool      strbuf_append(strbuf_t *sb, const char *s, ptrdiff_t len);
 emacs_value strbuf_to_estring(emacs_env *env, strbuf_t *sb);
 
 #endif /* EMACS_IO_UTIL_H */

@@ -117,7 +117,11 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       return eintern(env, "nil");
     }
 
-    strbuf_append(sb, (const char *)chunk, r);
+    if (!strbuf_append(sb, (const char *)chunk, r)) {
+      strbuf_free(sb);
+      signal_error(env, "Memory allocation failed");
+      return eintern(env, "nil");
+    }
   }
 
   /* parsed successfully — push back unconsumed bytes */
@@ -185,12 +189,7 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   /* Use prin1-to-string + write to stream */
   if (s && stream_is_open(s)) {
     emacs_value str = efuncall(env, "prin1-to-string", 1, &obj);
-    ptrdiff_t slen = 0;
-    char *cstr = estring_alloc(env, str, &slen);
-    if (cstr) {
-      stream_write(s, cstr, slen);
-      free(cstr);
-    }
+    stream_write_string(env, s, str);
   }
 
   return obj;
@@ -213,12 +212,7 @@ emacs_value Fprin1(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   emacs_value str = efuncall(env, "prin1-to-string", 1, args);
-  ptrdiff_t slen = 0;
-  char *cstr = estring_alloc(env, str, &slen);
-  if (cstr) {
-    stream_write(s, cstr, slen);
-    free(cstr);
-  }
+  stream_write_string(env, s, str);
   return args[0];
 }
 
@@ -251,14 +245,7 @@ emacs_value Fprinc(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     }
     free(cstr);
   }
-  {
-    ptrdiff_t slen = 0;
-    char *cstr = estring_alloc(env, str, &slen);
-    if (cstr) {
-      stream_write(s, cstr, slen);
-      free(cstr);
-    }
-  }
+  stream_write_string(env, s, str);
   return args[0];
 }
 

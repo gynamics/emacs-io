@@ -3,6 +3,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <poll.h>
 #include <sys/uio.h>
 
 /* ── internal fd-stream ops ──────────────────────────────────────────── */
@@ -186,7 +187,6 @@ static ptrdiff_t fds_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
 /* ── close ────────────────────────────────────────────────────────────── */
 
 static int fds_close(cl_stream_t *s) {
-  if (!atomic_load(&s->open)) return 0;
   fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
   if (!fi) return -1;
 
@@ -247,28 +247,20 @@ static bool fds_listen(cl_stream_t *s) {
   /* data in read buffer */
   if (fi->rpos < fi->rlen) return true;
 
-  /* try a non-blocking peek */
-  int fdflags = fcntl(fi->fd, F_GETFL, 0);
-  if (fdflags < 0) return false;
-  bool was_nonblock = (fdflags & O_NONBLOCK) != 0;
-  if (!was_nonblock)
-    fcntl(fi->fd, F_SETFL, fdflags | O_NONBLOCK);
+  struct pollfd pfd;
+  pfd.fd = fi->fd;
+  pfd.events = POLLIN;
+  pfd.revents = 0;
 
-  unsigned char peek;
-  ssize_t r = read(fi->fd, &peek, 1);
+  int rc = poll(&pfd, 1, 0);
+  if (rc <= 0) return false;
 
-  if (!was_nonblock)
-    fcntl(fi->fd, F_SETFL, fdflags);
-
+  /* peek one byte into the read buffer */
+  ssize_t r = read(fi->fd, &fi->rbuf[fi->rlen], 1);
   if (r == 1) {
-    /* put the byte into the read buffer */
-    if (fi->rlen < fi->rsz) {
-      fi->rbuf[fi->rlen++] = peek;
-    }
+    fi->rlen++;
     return true;
   }
-  if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-    return false;
   return false;
 }
 

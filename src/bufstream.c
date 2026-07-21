@@ -21,7 +21,6 @@ static const cl_stream_ops_t buffer_input_ops = {
 };
 
 typedef struct {
-  emacs_env  *env;
   emacs_value buffer_ref;
   ptrdiff_t   pos;
   ptrdiff_t   end;
@@ -36,7 +35,6 @@ cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
   buffer_input_full_t *bi = calloc(1, sizeof(*bi));
   if (!bi) return NULL;
 
-  bi->env = env;
   bi->buffer_ref = env->make_global_ref(env, buffer);
   bi->pos = start;
   bi->end = end;
@@ -73,7 +71,8 @@ static ptrdiff_t fill_chunk(buffer_input_full_t *bi) {
   ptrdiff_t to_read = remaining < (ptrdiff_t)bi->chunk_size
                       ? remaining : (ptrdiff_t)bi->chunk_size;
 
-  emacs_env *env = bi->env;
+  emacs_env *env = cl_env();
+  if (!env) return 0;
 
   emacs_value args[2];
   args[0] = eint(env, bi->pos);
@@ -113,11 +112,10 @@ static ptrdiff_t bis_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
 }
 
 static int bis_close(cl_stream_t *s) {
-  if (!atomic_load(&s->open)) return 0;
   buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
   if (bi) {
-    emacs_env *env = bi->env;
-    env->free_global_ref(env, bi->buffer_ref);
+    emacs_env *env = cl_env();
+    if (env) env->free_global_ref(env, bi->buffer_ref);
     free(bi->chunk);
   }
   atomic_store(&s->open, false);

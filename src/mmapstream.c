@@ -1,5 +1,4 @@
 #include "stream.h"
-#include "util.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -26,10 +25,6 @@ static const cl_stream_ops_t mmap_stream_ops = {
   .direct   = mmap_direct,
   .advance  = mmap_advance,
 };
-
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 cl_stream_t *stream_create_mmap(int fd, bool owns_fd) {
   struct stat st;
@@ -75,7 +70,6 @@ static ptrdiff_t mmap_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
 }
 
 static int mmap_close(cl_stream_t *s) {
-  if (!atomic_load(&s->open)) return 0;
   mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
   if (mi) {
     munmap(mi->addr, mi->size);

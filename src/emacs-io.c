@@ -108,6 +108,8 @@ int emacs_module_init(struct emacs_runtime *runtime) {
   /* ensure we have at least emacs_env_31 */
   if ((size_t)env->size < sizeof(struct emacs_env_31)) return 1;
 
+  cl_rt = runtime;
+
   /* ── reader ──────────────────────────────────────────────────────── */
   defun(env, "cl-read-char", Fread_char, 0, 3,
         "Read one character from STREAM and return it.\n"

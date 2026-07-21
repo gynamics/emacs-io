@@ -12,7 +12,12 @@ ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
   if (!atomic_load(&s->open)) return 0;
   LOCK(s);
 
-  /* drain pushback ring buffer first */
+  /* drain pushback ring buffer first.
+     Only pushback chars are returned — even if fewer than n.
+     Callers that need a full buffer must loop (see cl-read-line).
+     Returning partial data preserves correct FIFO ordering for
+     unread/peek semantics.  Merging pushback + stream data in one
+     call would leak pushback chars past earlier-unread bytes. */
   if (s->pushback_head != s->pushback_tail) {
     ptrdiff_t count = 0;
     unsigned char *dest = (unsigned char *)buf;

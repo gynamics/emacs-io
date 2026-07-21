@@ -4,6 +4,11 @@
 #include <stdio.h>
 #include <errno.h>
 
+/* ── runtime pointer ──────────────────────────────────────────────────── */
+
+struct emacs_runtime *cl_rt;
+emacs_env *cl_env(void) { return cl_rt ? cl_rt->get_environment(cl_rt) : NULL; }
+
 /* ── emacs_env helpers ────────────────────────────────────────────────── */
 
 emacs_value eintern(emacs_env *env, const char *name) {
@@ -141,20 +146,21 @@ void strbuf_free(strbuf_t *sb) {
   free(sb);
 }
 
-void strbuf_append(strbuf_t *sb, const char *s, ptrdiff_t len) {
-  if (len <= 0) return;
+bool strbuf_append(strbuf_t *sb, const char *s, ptrdiff_t len) {
+  if (len <= 0) return true;
   size_t needed = sb->len + (size_t)len + 1;
   if (needed > sb->cap) {
     size_t new_cap = sb->cap;
     while (new_cap < needed) new_cap = (new_cap * 3) / 2;
     char *new_data = realloc(sb->data, new_cap);
-    if (!new_data) return;
+    if (!new_data) return false;
     sb->data = new_data;
     sb->cap = new_cap;
   }
   memcpy(sb->data + sb->len, s, (size_t)len);
   sb->len += (size_t)len;
   sb->data[sb->len] = '\0';
+  return true;
 }
 
 emacs_value strbuf_to_estring(emacs_env *env, strbuf_t *sb) {

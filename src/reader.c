@@ -68,7 +68,11 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     }
 
     if (nl_off >= 0) {
-      strbuf_append(sb, (const char *)chunk, nl_off);
+      if (!strbuf_append(sb, (const char *)chunk, nl_off)) {
+        strbuf_free(sb);
+        signal_error(env, "Memory allocation failed");
+        return eintern(env, "nil");
+      }
       /* push leftover in forward order (FIFO queue: first in → first out) */
       for (ptrdiff_t i = nl_off + skip; i < r; i++)
         stream_unread(s, chunk[i]);
@@ -77,7 +81,11 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     }
 
     /* no newline found — keep accumulating */
-    strbuf_append(sb, (const char *)chunk, r);
+    if (!strbuf_append(sb, (const char *)chunk, r)) {
+      strbuf_free(sb);
+      signal_error(env, "Memory allocation failed");
+      return eintern(env, "nil");
+    }
   }
 
   if (sb->len == 0 && !saw_newline) {

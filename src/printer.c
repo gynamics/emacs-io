@@ -166,8 +166,12 @@ emacs_value Fclear_output(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   /* (cl-clear-output &optional stream)
      Clear pending output buffer. */
   cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-output*");
-  if (s && stream_is_open(s) && s->ops && s->ops->clear_output)
-    s->ops->clear_output(s);
+  if (s && stream_is_open(s)) {
+    pthread_mutex_lock(&s->mutex);
+    if (s->ops && s->ops->clear_output)
+      s->ops->clear_output(s);
+    pthread_mutex_unlock(&s->mutex);
+  }
   return eintern(env, "nil");
 }
 
@@ -180,13 +184,11 @@ emacs_value Fclear_input(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
      Discard pending input buffer. */
   cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-input*");
   if (s && stream_is_open(s)) {
-    /* clear pushback ring */
-    while (s->pushback_head != s->pushback_tail)
-      s->pushback_head = (s->pushback_head + 1) & 255;
+    pthread_mutex_lock(&s->mutex);
     s->pushback_head = s->pushback_tail = 0;
-    /* clear impl-specific buffers */
     if (s->ops && s->ops->clear_input)
       s->ops->clear_input(s);
+    pthread_mutex_unlock(&s->mutex);
   }
   return eintern(env, "nil");
 }
