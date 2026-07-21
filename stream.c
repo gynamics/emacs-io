@@ -1,0 +1,62 @@
+#include "stream.h"
+#include <stdlib.h>
+#include <string.h>
+
+/* ── dispatch helpers ────────────────────────────────────────────────── */
+
+#define LOCK(s)   pthread_mutex_lock(&(s)->mutex)
+#define UNLOCK(s) pthread_mutex_unlock(&(s)->mutex)
+
+ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
+  if (!s || !buf || n <= 0 || !s->ops || !s->ops->read) return 0;
+  if (!atomic_load(&s->open)) return 0;
+  LOCK(s);
+  ptrdiff_t r = s->ops->read(s, buf, n);
+  UNLOCK(s);
+  return r;
+}
+
+ptrdiff_t stream_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
+  if (!s || !buf || n <= 0 || !s->ops || !s->ops->write) return 0;
+  if (!atomic_load(&s->open)) return 0;
+  LOCK(s);
+  ptrdiff_t r = s->ops->write(s, buf, n);
+  UNLOCK(s);
+  return r;
+}
+
+int stream_close(cl_stream_t *s) {
+  if (!s || !s->ops || !s->ops->close) return -1;
+  if (!atomic_load(&s->open)) return 0;
+  LOCK(s);
+  int r = s->ops->close(s);
+  UNLOCK(s);
+  return r;
+}
+
+int stream_flush(cl_stream_t *s) {
+  if (!s || !s->ops || !s->ops->flush) return 0;
+  if (!atomic_load(&s->open)) return 0;
+  LOCK(s);
+  int r = s->ops->flush(s);
+  UNLOCK(s);
+  return r;
+}
+
+int stream_finish(cl_stream_t *s) {
+  if (!s || !s->ops || !s->ops->finish) return 0;
+  if (!atomic_load(&s->open)) return 0;
+  LOCK(s);
+  int r = s->ops->finish(s);
+  UNLOCK(s);
+  return r;
+}
+
+bool stream_listen(cl_stream_t *s) {
+  if (!s || !s->ops || !s->ops->listen) return false;
+  if (!atomic_load(&s->open)) return false;
+  LOCK(s);
+  bool r = s->ops->listen(s);
+  UNLOCK(s);
+  return r;
+}
