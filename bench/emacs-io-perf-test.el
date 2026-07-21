@@ -344,51 +344,6 @@
        nil))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
-;; scale/stress + misc
-;; ═══════════════════════════════════════════════════════════════════════════
-
-(ert-deftest emacs-io-perf-large-string-output ()
-  "100K write-string: no data corruption."
-  (let* ((big (make-string 100000 ?X))
-         (result (emacs-io-perf--with-string-output (cl-write-string big stream))))
-    (should (equal (length result) 100000))
-    (should (string-match-p "\\`X+\\'" result))))
-
-(ert-deftest emacs-io-perf-large-line-output ()
-  "1K write-line: correct number of newlines."
-  (let* ((n 1000)
-         (result (emacs-io-perf--with-string-output
-                   (dotimes (i n)
-                     (cl-write-line (format "line %d" i) stream)))))
-    (should (equal (cl-count ?\n result) n))))
-
-(ert-deftest emacs-io-perf-file-type-regular ()
-  "Regular temp file is detected as S_ISREG."
-  (emacs-io-perf--skip-unless-full
-   (let* ((file (make-temp-file "emacs-io-perf-"))
-          (s (cl-open file :direction :input)))
-     (unwind-protect (should (cl-file-regular-p s))
-       (cl-close s)
-       (ignore-errors (delete-file file))))))
-
-(ert-deftest emacs-io-perf-file-type-tty ()
-  "stdin from batch Emacs is not a tty; /dev/null is a character device."
-  (emacs-io-perf--skip-unless-full
-   (let ((s (cl-open "/dev/null" :direction :input)))
-     (unwind-protect
-         (progn (should-not (cl-file-tty-p s))
-                (should-not (cl-file-regular-p s)))
-       (cl-close s)))))
-
-(ert-deftest emacs-io-perf-mem-leak ()
-  "1000 create-write-destroy cycles; should not crash."
-  (emacs-io-perf--skip-unless-full
-   (dotimes (_ 1000)
-     (let ((s (cl-make-string-output-stream)))
-       (cl-write-string "hello world" s)
-       (cl-get-output-stream-string s)
-       (cl-close s)))
-   (should t)))
 
 (provide 'emacs-io-perf-test)
 ;;; emacs-io-perf-test.el ends here

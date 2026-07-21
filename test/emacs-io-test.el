@@ -580,5 +580,47 @@
     (cl-read-char stream)
     (should-error (cl-read-char stream))))
 
+;; ── scale/stress ────────────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-large-string-output ()
+  "100K write-string: no data corruption."
+  (let* ((big (make-string 100000 ?X))
+         (result (emacs-io-test--with-string-output (cl-write-string big stream))))
+    (should (equal (length result) 100000))
+    (should (string-match-p "\\`X+\\'" result))))
+
+(ert-deftest emacs-io-test-large-line-output ()
+  "1K write-line: correct newline count."
+  (let* ((n 1000)
+         (result (emacs-io-test--with-string-output
+                   (dotimes (i n)
+                     (cl-write-line (format "line %d" i) stream)))))
+    (should (equal (cl-count ?\n result) n))))
+
+(ert-deftest emacs-io-test-file-type-regular ()
+  "Regular temp file detected as S_ISREG."
+  (emacs-io-test--with-temp-file fname
+    (with-temp-file fname (insert "test"))
+    (let ((s (cl-open fname :direction :input)))
+      (unwind-protect (should (cl-file-regular-p s))
+        (cl-close s)))))
+
+(ert-deftest emacs-io-test-file-type-tty ()
+  "/dev/null is not a tty and not a regular file."
+  (let ((s (cl-open "/dev/null" :direction :input)))
+    (unwind-protect
+        (progn (should-not (cl-file-tty-p s))
+               (should-not (cl-file-regular-p s)))
+      (cl-close s))))
+
+(ert-deftest emacs-io-test-mem-leak ()
+  "1000 create-write-destroy cycles; should not crash."
+  (dotimes (_ 1000)
+    (let ((s (cl-make-string-output-stream)))
+      (cl-write-string "hello world" s)
+      (cl-get-output-stream-string s)
+      (cl-close s)))
+  (should t))
+
 (provide 'emacs-io-test)
 ;;; emacs-io-test.el ends here
