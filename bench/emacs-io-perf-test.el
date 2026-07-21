@@ -48,21 +48,38 @@
 ;; ═══════════════════════════════════════════════════════════════════════════
 
 (ert-deftest emacs-io-perf-bulk-write-10m ()
-  "10 MB single-call: cl-write-string vs insert, stream pre-allocated with :size."
+  "10 MB end-to-end: accumulate in memory + write to file.
+Compares the full pipeline both sides serve — build a string then persist it.
+Stream: string-output → cl-write-string → cl-get-output-stream-string →
+        cl-open output → cl-write-string → cl-close.
+Buffer: with-temp-buffer → insert → buffer-string →
+        with-temp-buffer → insert → write-region.
+The in-memory phase costs stream an extra copy_string_contents query+crossing;
+the file phase wins via raw write(2) bypassing write-region encoding/hooks."
   (emacs-io-perf--skip-unless-full
-   (let ((data (make-string (* 10 1024 1024) ?x)))
-     (emacs-io-perf--report "bulk-write 10M"
-       (emacs-io-perf--time (lambda ()
-                              (let ((s (cl-make-string-output-stream :size (length data))))
-                                (cl-write-string data s)
-                                (cl-get-output-stream-string s))))
-       (emacs-io-perf--time (lambda ()
-                              (with-temp-buffer (insert data) (buffer-string))))
-       ;; 3 module API calls (make_string, copy_string_contents x2) vs
-       ;; 2 internal Lisp primitives (insert, buffer-string).  The
-       ;; copy_string_contents API requires query-then-copy; insert does
-       ;; both in one internal operation.
-       nil))))
+   (let* ((data (make-string (* 10 1024 1024) ?x))
+           (fs (make-temp-file "emacs-io-perf-s-"))
+           (fb (make-temp-file "emacs-io-perf-b-")))
+     (unwind-protect
+         (emacs-io-perf--report "bulk-write 10M"
+           ;; stream: accumulate → persist
+           (emacs-io-perf--time (lambda ()
+                                  (let* ((so (cl-make-string-output-stream :size (length data))))
+                                    (cl-write-string data so)
+                                    (let ((result (cl-get-output-stream-string so)))
+                                      (let ((sf (cl-open fs :direction :output :if-exists :supersede)))
+                                        (cl-write-string result sf)
+                                        (cl-close sf))))))
+           ;; buffer: accumulate → persist
+           (emacs-io-perf--time (lambda ()
+                                  (let ((result (with-temp-buffer
+                                                  (insert data)
+                                                  (buffer-string))))
+                                    (with-temp-buffer
+                                      (insert result)
+                                      (write-region (point-min) (point-max) fb nil 'silent)))))
+           nil)
+       (ignore-errors (delete-file fs) (delete-file fb))))))
 
 (ert-deftest emacs-io-perf-bulk-read-10m ()
   "10 MB single-call: cl-read-string(N) vs buffer-string."
