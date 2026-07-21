@@ -48,16 +48,20 @@
 ;; ═══════════════════════════════════════════════════════════════════════════
 
 (ert-deftest emacs-io-perf-bulk-write-10m ()
-  "10 MB single-call: cl-write-string(big) vs insert(big)+buffer-string."
+  "10 MB single-call: cl-write-string vs insert, stream pre-allocated with :size."
   (emacs-io-perf--skip-unless-full
    (let ((data (make-string (* 10 1024 1024) ?x)))
      (emacs-io-perf--report "bulk-write 10M"
        (emacs-io-perf--time (lambda ()
-                              (emacs-io-perf--with-string-output
-                                (cl-write-string data stream))))
+                              (let ((s (cl-make-string-output-stream :size (length data))))
+                                (cl-write-string data s)
+                                (cl-get-output-stream-string s))))
        (emacs-io-perf--time (lambda ()
                               (with-temp-buffer (insert data) (buffer-string))))
-       ;; single giant call: module crossing overhead ~5ms vs Emacs internal primitive
+       ;; 3 module API calls (make_string, copy_string_contents x2) vs
+       ;; 2 internal Lisp primitives (insert, buffer-string).  The
+       ;; copy_string_contents API requires query-then-copy; insert does
+       ;; both in one internal operation.
        nil))))
 
 (ert-deftest emacs-io-perf-bulk-read-10m ()
@@ -283,15 +287,18 @@
 ;; ── batched record write: cl-write-strings vs insert loop ─────────────────
 
 (ert-deftest emacs-io-perf-strings-write-10k ()
-  "10K records batched: cl-write-strings vs insert loop."
+  "10K records batched: cl-write-strings vs insert loop, stream pre-allocated."
   (emacs-io-perf--skip-unless-full
    (let* ((n 10000)
+          (rec (format "%05d=%s\n" 0 (make-string 40 ?x)))
+          (total (* n (length rec)))
           (lines (mapcar (lambda (i) (format "%05d=%s\n" i (make-string 40 ?x)))
                          (number-sequence 0 (1- n)))))
      (emacs-io-perf--report "strings-write 10K"
        (emacs-io-perf--time (lambda ()
-                              (emacs-io-perf--with-string-output
-                                (cl-write-strings lines stream))))
+                              (let ((s (cl-make-string-output-stream :size total)))
+                                (cl-write-strings lines s)
+                                (cl-get-output-stream-string s))))
        (emacs-io-perf--time (lambda ()
                               (with-temp-buffer
                                 (dolist (line lines) (insert line))
@@ -327,21 +334,23 @@
 ;; ── batched bulk write: cl-write-strings vs insert loop ───────────────────
 
 (ert-deftest emacs-io-perf-strings-write-10m ()
-  "10 MB batched: cl-write-strings vs insert loop."
+  "10 MB batched: cl-write-strings vs insert loop, stream pre-allocated."
   (emacs-io-perf--skip-unless-full
    (let* ((chunk (make-string 10240 ?x))
           (n 1000)
           (strings (make-list n chunk)))
      (emacs-io-perf--report "strings-write 10M"
        (emacs-io-perf--time (lambda ()
-                              (emacs-io-perf--with-string-output
-                                (cl-write-strings strings stream))))
+                              (let ((s (cl-make-string-output-stream :size (* n 10240))))
+                                (cl-write-strings strings s)
+                                (cl-get-output-stream-string s))))
        (emacs-io-perf--time (lambda ()
                               (with-temp-buffer
-                          (dotimes (_ n) (insert chunk))
-                          (buffer-string))))
-       ;; Internal C loop (write_string per element) vs insert per element.
-       ;; Both do 1000 internal ops; near-tie at 0.8x is expected.
+                                (dotimes (_ n) (insert chunk))
+                                (buffer-string))))
+       ;; 1000 copy_string_contents calls (one per element) vs 1000
+       ;; insert calls.  copy_string_contents does query+copy (two API
+       ;; crossings per call); insert is one internal operation.
        nil))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
