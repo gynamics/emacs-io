@@ -39,10 +39,14 @@ ptrdiff_t stream_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
 }
 
 int stream_close(cl_stream_t *s) {
-  if (!s || !s->ops || !s->ops->close) return -1;
+  if (!s) return -1;
   if (!atomic_load(&s->open)) return 0;
   LOCK(s);
-  int r = s->ops->close(s);
+  int r = 0;
+  if (s->ops && s->ops->close)
+    r = s->ops->close(s);
+  else
+    atomic_store(&s->open, false);
   UNLOCK(s);
   return r;
 }

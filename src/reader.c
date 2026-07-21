@@ -7,22 +7,11 @@
 
 /* ── helpers ──────────────────────────────────────────────────────────── */
 
-cl_stream_t *get_stream_or_default(emacs_env *env, emacs_value *args,
-                                    ptrdiff_t nargs, int argidx,
-                                    const char *var) {
-  if (argidx < nargs && env->is_not_nil(env, args[argidx]))
-    return euser_ptr_stream_get(env, args[argidx]);
-
-  emacs_value sv = efuncall(env, "symbol-value", 1,
-                             (emacs_value[]){ eintern(env, var) });
-  return euser_ptr_stream_get(env, sv);
-}
-
-static void check_open(emacs_env *env, cl_stream_t *s, const char *op) {
+void check_open(emacs_env *env, cl_stream_t *s, const char *op) {
   if (!s || !stream_is_open(s)) {
     char buf[256];
     snprintf(buf, sizeof(buf), "Stream is closed in %s", op);
-    signal_stream_error(env, s, buf);
+    signal_error(env, buf);
   }
 }
 
@@ -40,7 +29,7 @@ emacs_value Fread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   if (r <= 0) {
     if (nargs >= 2 && !env->is_not_nil(env, args[1])) /* eof-error-p nil */
       return (nargs >= 3) ? args[2] : eintern(env, "nil");
-    signal_end_of_file(env, s);
+    signal_error(env, "End of file on stream");
     return eintern(env, "nil");
   }
   return eint(env, ch);
@@ -95,7 +84,7 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     strbuf_free(sb);
     if (nargs >= 2 && !env->is_not_nil(env, args[1]))
       return (nargs >= 3) ? args[2] : eintern(env, "nil");
-    signal_end_of_file(env, s);
+    signal_error(env, "End of file on stream");
     return eintern(env, "nil");
   }
 
@@ -122,7 +111,7 @@ emacs_value Fread_byte(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   if (r <= 0) {
     if (nargs >= 2 && !env->is_not_nil(env, args[1]))
       return (nargs >= 3) ? args[2] : eintern(env, "nil");
-    signal_end_of_file(env, s);
+    signal_error(env, "End of file on stream");
     return eintern(env, "nil");
   }
   return eint(env, b);
@@ -140,17 +129,11 @@ emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                                           "*standard-input*");
   check_open(env, s, "cl-peek-char");
 
-  /* hack: read a char, store it back in the stream's pushback-like buffer?
-     Since our core stream doesn't have pushback, we approximate:
-     For fd streams: use fds_listen to check if data available.
-     For string streams: just read+restore position.
-  */
   if (!stream_listen(s)) {
     return eintern(env, "nil");
   }
 
-  /* For simplicity: read and we'll lose it. A full pushback would require
-     stream-level unread support. */
+  /* read one char, push it back via stream_unread */
   unsigned char ch;
   ptrdiff_t r = stream_read(s, &ch, 1);
   if (r <= 0) {
@@ -203,7 +186,7 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   emacs_value seq = args[0];
   cl_stream_t *s = euser_ptr_stream_get(env, args[1]);
   if (!s || !stream_is_open(s))
-    signal_stream_error(env, s, "Stream is closed");
+    signal_error(env, "Stream is closed");
 
   ptrdiff_t len = env->vec_size(env, seq);
   ptrdiff_t start = 0;
@@ -261,7 +244,7 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     if (to_read == 0) {
       if (nargs >= 4 && !env->is_not_nil(env, args[2]))
         return (nargs >= 4) ? args[3] : eintern(env, "nil");
-      signal_end_of_file(env, s);
+      signal_error(env, "End of file on stream");
       return eintern(env, "nil");
     }
     emacs_value result = env->make_unibyte_string(env, (const char *)daddr,
@@ -279,7 +262,7 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     free(buf);
     if (nargs >= 4 && !env->is_not_nil(env, args[2]))
       return (nargs >= 4) ? args[3] : eintern(env, "nil");
-    signal_end_of_file(env, s);
+    signal_error(env, "End of file on stream");
     return eintern(env, "nil");
   }
 

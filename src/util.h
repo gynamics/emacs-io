@@ -13,15 +13,11 @@ emacs_value efuncall(emacs_env *env, const char *fname, ptrdiff_t nargs,
 
 emacs_value estring(emacs_env *env, const char *s);
 char       *estrdup(emacs_env *env, emacs_value val);
-ptrdiff_t   estrlen(emacs_env *env, emacs_value val);
 bool        estring_copy(emacs_env *env, emacs_value val, char *buf, ptrdiff_t *lenp);
 char       *estring_alloc(emacs_env *env, emacs_value val, ptrdiff_t *len_out);
 
 emacs_value eint(emacs_env *env, intmax_t n);
 intmax_t    eint_extract(emacs_env *env, emacs_value v);
-
-emacs_value euser_ptr(emacs_env *env, void *ptr, void (*fin)(void *));
-void       *euser_ptr_get(emacs_env *env, emacs_value val);
 
 /* ── defun registration ───────────────────────────────────────────────── */
 
@@ -38,13 +34,14 @@ void provide(emacs_env *env, const char *feature);
 
 cl_stream_t *euser_ptr_stream_get(emacs_env *env, emacs_value val);
 emacs_value  euser_ptr_stream_make(emacs_env *env, cl_stream_t *s);
+cl_stream_t *get_stream_or_default(emacs_env *env, emacs_value *args,
+                                    ptrdiff_t nargs, int argidx,
+                                    const char *var);
+void check_open(emacs_env *env, cl_stream_t *s, const char *op);
 
 /* ── error signaling ──────────────────────────────────────────────────── */
 
 void signal_error(emacs_env *env, const char *msg);
-void signal_file_error(emacs_env *env, const char *msg);
-void signal_stream_error(emacs_env *env, cl_stream_t *s, const char *msg);
-void signal_end_of_file(emacs_env *env, cl_stream_t *s);
 
 /* ── string builder (for accumulating output) ─────────────────────────── */
 
@@ -61,7 +58,6 @@ bool kw_eq(emacs_env *env, emacs_value kw, const char *name);
 strbuf_t *strbuf_create(size_t initial_cap);
 void      strbuf_free(strbuf_t *sb);
 void      strbuf_append(strbuf_t *sb, const char *s, ptrdiff_t len);
-void      strbuf_append_char(strbuf_t *sb, int c);
 emacs_value strbuf_to_estring(emacs_env *env, strbuf_t *sb);
 
 #endif /* EMACS_IO_UTIL_H */

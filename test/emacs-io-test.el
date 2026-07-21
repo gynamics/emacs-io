@@ -487,13 +487,6 @@
                   (cl-print "hello" stream))))
     (should (string-prefix-p "\n\"hello\"" result))))
 
-;; ── cl-read-preserving-whitespace ─────────────────────────────────────────
-
-(ert-deftest emacs-io-test-read-preserving-whitespace ()
-  "Test cl-read-preserving-whitespace."
-  (emacs-io-test--with-string-input "  hello"
-    (should (equal (cl-read-preserving-whitespace stream) 'hello))))
-
 ;; ── cl-write ──────────────────────────────────────────────────────────────
 
 (ert-deftest emacs-io-test-cl-write ()

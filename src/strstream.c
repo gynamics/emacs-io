@@ -6,7 +6,6 @@
 /* ── string-input ops ────────────────────────────────────────────────── */
 
 static ptrdiff_t sis_read(cl_stream_t *s, void *buf, ptrdiff_t n);
-static int       sis_close(cl_stream_t *s);
 static bool      sis_listen(cl_stream_t *s);
 static void      sis_destroy(cl_stream_t *s);
 static bool      sis_direct(cl_stream_t *s, const void **addr, size_t *len);
@@ -16,7 +15,7 @@ static void      sis_clear_input(cl_stream_t *s);
 static const cl_stream_ops_t string_input_ops = {
   .read        = sis_read,
   .write       = NULL,
-  .close       = sis_close,
+  .close       = NULL,   /* default: atomic store open=false */
   .flush       = NULL,
   .finish      = NULL,
   .listen      = sis_listen,
@@ -29,7 +28,6 @@ static const cl_stream_ops_t string_input_ops = {
 /* ── string-output ops ───────────────────────────────────────────────── */
 
 static ptrdiff_t sos_write(cl_stream_t *s, const void *buf, ptrdiff_t n);
-static int       sos_close(cl_stream_t *s);
 static void      sos_destroy(cl_stream_t *s);
 static ptrdiff_t sos_write_string(emacs_env *env, cl_stream_t *s, emacs_value str);
 static void      sos_clear_output(cl_stream_t *s);
@@ -37,7 +35,7 @@ static void      sos_clear_output(cl_stream_t *s);
 static const cl_stream_ops_t string_output_ops = {
   .read         = NULL,
   .write        = sos_write,
-  .close        = sos_close,
+  .close        = NULL,
   .flush        = NULL,
   .finish       = NULL,
   .listen       = NULL,
@@ -80,12 +78,6 @@ static ptrdiff_t sis_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
   memcpy(buf, si->data + si->pos, to_copy);
   si->pos += to_copy;
   return (ptrdiff_t)to_copy;
-}
-
-static int sis_close(cl_stream_t *s) {
-  if (!atomic_load(&s->open)) return 0;
-  atomic_store(&s->open, false);
-  return 0;
 }
 
 static void sis_destroy(cl_stream_t *s) {
@@ -245,12 +237,6 @@ static void sos_clear_output(cl_stream_t *s) {
   so->total_len = 0;
 }
 
-static int sos_close(cl_stream_t *s) {
-  if (!atomic_load(&s->open)) return 0;
-  atomic_store(&s->open, false);
-  return 0;
-}
-
 static void sos_destroy(cl_stream_t *s) {
   str_output_impl_t *so = (str_output_impl_t *)s->impl;
   if (!so) return;
@@ -293,256 +279,82 @@ emacs_value str_output_to_string(emacs_env *env, cl_stream_t *s) {
   return result;
 }
 
-/* ── mmap-backed input stream (regular files only) ────────────────────── */
+/* ── cl-make-string-input-stream ──────────────────────────────────────── */
 
-static ptrdiff_t mmap_read(cl_stream_t *s, void *buf, ptrdiff_t n);
-static int       mmap_close(cl_stream_t *s);
-static bool      mmap_listen(cl_stream_t *s);
-static void      mmap_destroy(cl_stream_t *s);
-static bool      mmap_direct(cl_stream_t *s, const void **addr, size_t *len);
-static void      mmap_advance(cl_stream_t *s, ptrdiff_t n);
-
-static const cl_stream_ops_t mmap_stream_ops = {
-  .read     = mmap_read,
-  .write    = NULL,
-  .close    = mmap_close,
-  .flush    = NULL,
-  .finish   = NULL,
-  .listen   = mmap_listen,
-  .destroy  = mmap_destroy,
-  .direct   = mmap_direct,
-  .advance  = mmap_advance,
-};
-
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-cl_stream_t *stream_create_mmap(int fd, bool owns_fd) {
-  struct stat st;
-  if (fstat(fd, &st) < 0 || st.st_size <= 0) return NULL;
-
-  void *addr = mmap(NULL, (size_t)st.st_size, PROT_READ,
-                    MAP_PRIVATE, fd, 0);
-  if (addr == MAP_FAILED) return NULL;
-
-  mmap_stream_impl_t *mi = calloc(1, sizeof(*mi));
-  if (!mi) { munmap(addr, (size_t)st.st_size); return NULL; }
-
-  mi->addr = addr;
-  mi->size = (size_t)st.st_size;
-  mi->pos  = 0;
-  mi->fd   = fd;
-  mi->owns_fd = owns_fd;
-
-  cl_stream_t *s = calloc(1, sizeof(*s));
-  if (!s) { munmap(addr, (size_t)st.st_size); free(mi); return NULL; }
-
-  s->ops = &mmap_stream_ops;
-  s->impl = mi;
-  s->kind = CL_STREAM_KIND_MMAP;
-  s->flags = CL_STREAM_FLAG_INPUT;
-  s->file_mode = st.st_mode;  /* already have from fstat above */
-  atomic_init(&s->open, true);
-  pthread_mutex_init(&s->mutex, NULL);
-
-  return s;
-}
-
-static ptrdiff_t mmap_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
-  if (!s || !buf || n <= 0) return 0;
-  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
-  if (!mi || mi->pos >= mi->size) return 0;
-
-  size_t remaining = mi->size - mi->pos;
-  size_t to_copy = (size_t)n < remaining ? (size_t)n : remaining;
-  memcpy(buf, (const char *)mi->addr + mi->pos, to_copy);
-  mi->pos += to_copy;
-  return (ptrdiff_t)to_copy;
-}
-
-static int mmap_close(cl_stream_t *s) {
-  if (!atomic_load(&s->open)) return 0;
-  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
-  if (mi) {
-    munmap(mi->addr, mi->size);
-    if (mi->owns_fd && mi->fd >= 0) close(mi->fd);
+emacs_value Fmake_string_input(emacs_env *env, ptrdiff_t nargs,
+                               emacs_value *args, void *data) {
+  (void)data;
+  /* (cl-make-string-input-stream string &optional start end) */
+  if (nargs < 1) {
+    signal_error(env, "cl-make-string-input-stream requires 1 argument");
+    return eintern(env, "nil");
   }
-  atomic_store(&s->open, false);
-  return 0;
-}
 
-static void mmap_destroy(cl_stream_t *s) {
-  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
-  if (mi) free(mi);
-}
-
-static bool mmap_listen(cl_stream_t *s) {
-  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
-  return mi != NULL && mi->pos < mi->size;
-}
-
-static bool mmap_direct(cl_stream_t *s, const void **addr, size_t *len) {
-  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
-  if (!mi || mi->pos >= mi->size) return false;
-  *addr = (const char *)mi->addr + mi->pos;
-  *len = mi->size - mi->pos;
-  return true;
-}
-
-static void mmap_advance(cl_stream_t *s, ptrdiff_t n) {
-  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
-  if (!mi || n <= 0) return;
-  mi->pos += (size_t)n;
-  if (mi->pos > mi->size) mi->pos = mi->size;
-}
-
-/* ── buffer input stream ─────────────────────────────────────────────── */
-
-static ptrdiff_t bis_read(cl_stream_t *s, void *buf, ptrdiff_t n);
-static int       bis_close(cl_stream_t *s);
-static bool      bis_listen(cl_stream_t *s);
-static void      bis_destroy(cl_stream_t *s);
-
-static const cl_stream_ops_t buffer_input_ops = {
-  .read    = bis_read,
-  .write   = NULL,
-  .close   = bis_close,
-  .flush   = NULL,
-  .finish  = NULL,
-  .listen  = bis_listen,
-  .destroy = bis_destroy,
-};
-
-typedef struct {
-  emacs_env  *env;
-  emacs_value buffer_ref;
-  ptrdiff_t   pos;
-  ptrdiff_t   end;
-  char       *chunk;
-  size_t      chunk_size;
-  size_t      chunk_pos;
-  size_t      chunk_len;
-} buffer_input_full_t;
-
-cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
-                                        ptrdiff_t start, ptrdiff_t end) {
-  buffer_input_full_t *bi = calloc(1, sizeof(*bi));
-  if (!bi) return NULL;
-
-  bi->env = env;
-  bi->buffer_ref = env->make_global_ref(env, buffer);
-  bi->pos = start;
-  bi->end = end;
-  bi->chunk_size = BUFFER_STREAM_CHUNK;
-  bi->chunk = malloc(bi->chunk_size);
-  if (!bi->chunk) {
-    env->free_global_ref(env, bi->buffer_ref);
-    free(bi);
-    return NULL;
+  ptrdiff_t slen = 0;
+  char *str = estring_alloc(env, args[0], &slen);
+  if (!str) {
+    signal_error(env, "Cannot extract string");
+    return eintern(env, "nil");
   }
-  bi->chunk_pos = 0;
-  bi->chunk_len = 0;
 
-  buffer_input_impl_t *bi_pub = malloc(sizeof(*bi_pub));
-  if (!bi_pub) {
-    env->free_global_ref(env, bi->buffer_ref);
-    free(bi->chunk);
-    free(bi);
-    return NULL;
-  }
-  bi_pub->buffer = bi->buffer_ref;
-  bi_pub->pos = start;
-  bi_pub->end = end;
-  bi_pub->owns_ref = true;
+  ptrdiff_t start = 0;
+  ptrdiff_t end = slen;
+  if (nargs >= 2 && env->is_not_nil(env, args[1]))
+    start = eint_extract(env, args[1]);
+  if (nargs >= 3 && env->is_not_nil(env, args[2]))
+    end = eint_extract(env, args[2]);
 
-  cl_stream_t *s = calloc(1, sizeof(*s));
+  if (start < 0) start = 0;
+  if (end > slen) end = slen;
+  if (end < start) end = start;
+
+  /* pass the full malloc'd buffer; set cursor via impl fields.
+     sis_destroy will free(str) — must be the base of the allocation. */
+  cl_stream_t *s = stream_create_string_input(str, (size_t)slen);
   if (!s) {
-    env->free_global_ref(env, bi->buffer_ref);
-    free(bi->chunk);
-    free(bi);
-    free(bi_pub);
-    return NULL;
+    free(str);
+    signal_error(env, "Cannot create string input stream");
+    return eintern(env, "nil");
   }
+  string_input_impl_t *si = (string_input_impl_t *)s->impl;
+  si->pos = (size_t)start;
+  si->len = (size_t)end;
 
-  s->ops = &buffer_input_ops;
-  s->impl = bi;
-  s->kind = CL_STREAM_KIND_BUFFER_INPUT;
-  s->flags = CL_STREAM_FLAG_INPUT;
-  atomic_init(&s->open, true);
-  pthread_mutex_init(&s->mutex, NULL);
-
-  return s;
+  return euser_ptr_stream_make(env, s);
 }
 
-static ptrdiff_t fill_chunk(buffer_input_full_t *bi) {
-  if (bi->pos >= bi->end) return 0;
-  ptrdiff_t remaining = bi->end - bi->pos;
-  ptrdiff_t to_read = remaining < (ptrdiff_t)bi->chunk_size
-                      ? remaining : (ptrdiff_t)bi->chunk_size;
+/* ── cl-make-string-output-stream ──────────────────────────────────────── */
 
-  emacs_env *env = bi->env;
-
-  emacs_value args[2];
-  args[0] = eint(env, bi->pos);
-  args[1] = eint(env, bi->pos + to_read);
-  emacs_value text = efuncall(env, "buffer-substring-no-properties", 2, args);
-
-  ptrdiff_t copied = (ptrdiff_t)bi->chunk_size;
-  if (!env->copy_string_contents(env, text, bi->chunk, &copied)) return 0;
-  copied -= 1; /* exclude null terminator */
-
-  bi->pos += copied;
-  bi->chunk_len = (size_t)copied;
-  bi->chunk_pos = 0;
-  return copied;
-}
-
-static ptrdiff_t bis_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
-  if (!s || !buf || n <= 0) return 0;
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (!bi) return 0;
-
-  ptrdiff_t total = 0;
-  unsigned char *dest = (unsigned char *)buf;
-
-  while (total < n) {
-    if (bi->chunk_pos >= bi->chunk_len) {
-      if (fill_chunk(bi) <= 0) break;
-    }
-    size_t avail = bi->chunk_len - bi->chunk_pos;
-    size_t want = (size_t)(n - total);
-    size_t to_copy = avail < want ? avail : want;
-    memcpy(dest + total, bi->chunk + bi->chunk_pos, to_copy);
-    bi->chunk_pos += to_copy;
-    total += (ptrdiff_t)to_copy;
+emacs_value Fmake_string_output(emacs_env *env, ptrdiff_t nargs,
+                                emacs_value *args, void *data) {
+  (void)data;
+  /* (cl-make-string-output-stream &key element-type size) */
+  size_t hint = 0;
+  for (ptrdiff_t i = 0; i < nargs - 1; i += 2) {
+    if (kw_eq(env, args[i], ":size"))
+      hint = (size_t)eint_extract(env, args[i + 1]);
   }
-  return total;
-}
-
-static int bis_close(cl_stream_t *s) {
-  if (!atomic_load(&s->open)) return 0;
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (bi) {
-    emacs_env *env = bi->env;
-    env->free_global_ref(env, bi->buffer_ref);
-    free(bi->chunk);
+  cl_stream_t *s = stream_create_string_output(hint);
+  if (!s) {
+    signal_error(env, "Cannot create string output stream");
+    return eintern(env, "nil");
   }
-  atomic_store(&s->open, false);
-  return 0;
+  return euser_ptr_stream_make(env, s);
 }
 
-static void bis_destroy(cl_stream_t *s) {
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (bi) {
-    free(bi->chunk);
-    free(bi);
+/* ── cl-get-output-stream-string ──────────────────────────────────────── */
+
+emacs_value Fget_output_stream_string(emacs_env *env, ptrdiff_t nargs,
+                                       emacs_value *args, void *data) {
+  (void)data;
+  if (nargs < 1) {
+    signal_error(env, "cl-get-output-stream-string requires 1 argument");
+    return eintern(env, "nil");
   }
-}
-
-static bool bis_listen(cl_stream_t *s) {
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (!bi) return false;
-  if (bi->chunk_pos < bi->chunk_len) return true;
-  return bi->pos < bi->end;
+  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
+  if (!s || s->kind != CL_STREAM_KIND_STRING_OUTPUT) {
+    signal_error(env, "Not a string output stream");
+    return eintern(env, "nil");
+  }
+  return str_output_to_string(env, s);
 }

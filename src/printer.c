@@ -5,28 +5,7 @@
 #include <string.h>
 #include <stdio.h>
 
-extern cl_stream_t *get_stream_or_default(emacs_env *env, emacs_value *args,
-                                           ptrdiff_t nargs, int argidx,
-                                           const char *var);
-
 /* ── helpers ──────────────────────────────────────────────────────────── */
-
-static cl_stream_t *get_output_stream(emacs_env *env, emacs_value *args,
-                                       ptrdiff_t nargs, int argidx) {
-  if (argidx < nargs && env->is_not_nil(env, args[argidx]))
-    return euser_ptr_stream_get(env, args[argidx]);
-  emacs_value sv = efuncall(env, "symbol-value", 1,
-                             (emacs_value[]){ eintern(env, "*standard-output*") });
-  return euser_ptr_stream_get(env, sv);
-}
-
-static void write_check(emacs_env *env, cl_stream_t *s, const char *op) {
-  if (!s || !stream_is_open(s)) {
-    char buf[256];
-    snprintf(buf, sizeof(buf), "Stream closed in %s", op);
-    signal_stream_error(env, s, buf);
-  }
-}
 
 /* ── cl-write-char ────────────────────────────────────────────────────── */
 
@@ -39,8 +18,8 @@ emacs_value Fwrite_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     return eintern(env, "nil");
   }
   intmax_t ch = eint_extract(env, args[0]);
-  cl_stream_t *s = get_output_stream(env, args, nargs, 1);
-  write_check(env, s, "cl-write-char");
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 1, "*standard-output*");
+  check_open(env, s, "cl-write-char");
 
   unsigned char b = (unsigned char)(ch & 0xFF);
   stream_write(s, &b, 1);
@@ -58,8 +37,8 @@ emacs_value Fwrite_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     return eintern(env, "nil");
   }
 
-  cl_stream_t *s = get_output_stream(env, args, nargs, 1);
-  write_check(env, s, "cl-write-string");
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 1, "*standard-output*");
+  check_open(env, s, "cl-write-string");
 
   /* check if start/end are present */
   bool has_start = false, has_end = false;
@@ -103,8 +82,8 @@ emacs_value Fwrite_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
   Fwrite_string(env, nargs, args, data);
 
-  cl_stream_t *s = get_output_stream(env, args, nargs, 1);
-  write_check(env, s, "cl-write-line");
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 1, "*standard-output*");
+  check_open(env, s, "cl-write-line");
   unsigned char nl = '\n';
   stream_write(s, &nl, 1);
   return args[0];
@@ -122,7 +101,7 @@ emacs_value Fwrite_byte(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
   intmax_t b = eint_extract(env, args[0]);
   cl_stream_t *s = euser_ptr_stream_get(env, args[1]);
-  write_check(env, s, "cl-write-byte");
+  check_open(env, s, "cl-write-byte");
 
   unsigned char ub = (unsigned char)(b & 0xFF);
   stream_write(s, &ub, 1);
@@ -135,8 +114,8 @@ emacs_value Fterpri(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                      void *data) {
   (void)data;
   /* (cl-terpri &optional stream) */
-  cl_stream_t *s = get_output_stream(env, args, nargs, 0);
-  write_check(env, s, "cl-terpri");
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-output*");
+  check_open(env, s, "cl-terpri");
   unsigned char nl = '\n';
   stream_write(s, &nl, 1);
   return eintern(env, "nil");
@@ -147,11 +126,9 @@ emacs_value Fterpri(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 emacs_value Ffresh_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                          void *data) {
   (void)data;
-  /* (cl-fresh-line &optional stream)
-     Write a newline if not at start of line. Since we don't track columns
-     in core streams, always write a newline. */
-  cl_stream_t *s = get_output_stream(env, args, nargs, 0);
-  write_check(env, s, "cl-fresh-line");
+  /* TODO: track column; always writes newline for now */
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-output*");
+  check_open(env, s, "cl-fresh-line");
   unsigned char nl = '\n';
   stream_write(s, &nl, 1);
   return eintern(env, "t");
@@ -163,8 +140,8 @@ emacs_value Ffinish_output(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                             void *data) {
   (void)data;
   /* (cl-finish-output &optional stream) */
-  cl_stream_t *s = get_output_stream(env, args, nargs, 0);
-  write_check(env, s, "cl-finish-output");
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-output*");
+  check_open(env, s, "cl-finish-output");
   stream_finish(s);
   return eintern(env, "nil");
 }
@@ -175,8 +152,8 @@ emacs_value Fforce_output(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                            void *data) {
   (void)data;
   /* (cl-force-output &optional stream) */
-  cl_stream_t *s = get_output_stream(env, args, nargs, 0);
-  write_check(env, s, "cl-force-output");
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-output*");
+  check_open(env, s, "cl-force-output");
   stream_flush(s);
   return eintern(env, "nil");
 }
@@ -188,7 +165,7 @@ emacs_value Fclear_output(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   (void)data;
   /* (cl-clear-output &optional stream)
      Clear pending output buffer. */
-  cl_stream_t *s = get_output_stream(env, args, nargs, 0);
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-output*");
   if (s && stream_is_open(s) && s->ops && s->ops->clear_output)
     s->ops->clear_output(s);
   return eintern(env, "nil");
@@ -227,7 +204,7 @@ emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   emacs_value seq = args[0];
   cl_stream_t *s = euser_ptr_stream_get(env, args[1]);
-  write_check(env, s, "cl-write-sequence");
+  check_open(env, s, "cl-write-sequence");
 
   ptrdiff_t len = env->vec_size(env, seq);
   ptrdiff_t start = 0;

@@ -80,8 +80,6 @@ extern emacs_value Fread(emacs_env *env, ptrdiff_t nargs,
                           emacs_value *args, void *data);
 extern emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
                                       emacs_value *args, void *data);
-extern emacs_value Fread_preserving_whitespace(emacs_env *env, ptrdiff_t nargs,
-                                                emacs_value *args, void *data);
 extern emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs,
                            emacs_value *args, void *data);
 extern emacs_value Fprin1(emacs_env *env, ptrdiff_t nargs,
@@ -361,13 +359,7 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "Keywords :START and :END delimit the substring to read.\n"
         "If :PRESERVE-WHITESPACE is non-nil, trailing whitespace is kept\n"
         "in the secondary return value (delegated to Emacs reader).\n"
-        "\n(fn STRING &optional EOF-ERROR-P EOF-VALUE &key START END PRESERVE-WHITESPACE)", NULL);
-
-  defun(env, "cl-read-preserving-whitespace", Fread_preserving_whitespace, 0, 4,
-        "Read one Lisp object from STREAM, preserving whitespace after it.\n"
-        "\n"
-        "Currently behaves identically to `cl-read'.\n"
-        "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE RECURSIVE-P)", NULL);
+         "\n(fn STRING &optional EOF-ERROR-P EOF-VALUE &key START END PRESERVE-WHITESPACE)", NULL);
 
   defun(env, "cl-write", Fwrite, 1, 15,
         "Write OBJECT to STREAM.\n"

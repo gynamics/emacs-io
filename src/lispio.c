@@ -4,26 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ── helpers ──────────────────────────────────────────────────────────── */
-
-static cl_stream_t *get_lisp_input_stream(emacs_env *env, emacs_value *args,
-                                           ptrdiff_t nargs) {
-  if (nargs >= 1 && env->is_not_nil(env, args[0]))
-    return euser_ptr_stream_get(env, args[0]);
-  emacs_value sv = efuncall(env, "symbol-value", 1,
-                             (emacs_value[]){ eintern(env, "*standard-input*") });
-  return euser_ptr_stream_get(env, sv);
-}
-
-static cl_stream_t *get_lisp_output_stream(emacs_env *env, emacs_value *args,
-                                            ptrdiff_t nargs, int pos) {
-  if (pos < nargs && env->is_not_nil(env, args[pos]))
-    return euser_ptr_stream_get(env, args[pos]);
-  emacs_value sv = efuncall(env, "symbol-value", 1,
-                             (emacs_value[]){ eintern(env, "*standard-output*") });
-  return euser_ptr_stream_get(env, sv);
-}
-
 /* ── try-read-from-buffer ──────────────────────────────────────────────
    Attempt to call read-from-string on sb->data.
    On success: store the parsed value in *result, set *consumed to the
@@ -78,7 +58,7 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                   void *data) {
   (void)data;
   /* (cl-read &optional stream eof-error-p eof-value recursive-p) */
-  cl_stream_t *s = get_lisp_input_stream(env, args, nargs);
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-input*");
   if (!s || !stream_is_open(s)) {
     signal_error(env, "cl-read: stream is closed");
     return eintern(env, "nil");
@@ -133,7 +113,7 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       strbuf_free(sb);
       if (nargs >= 2 && !env->is_not_nil(env, args[1]))
         return (nargs >= 3) ? args[2] : eintern(env, "nil");
-      signal_end_of_file(env, s);
+      signal_error(env, "End of file on stream");
       return eintern(env, "nil");
     }
 
@@ -176,15 +156,6 @@ emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
 
   emacs_value result = efuncall(env, "read-from-string", 2, read_args);
   return efuncall(env, "car", 1, &result);
-}
-
-/* ── cl-read-preserving-whitespace ──────────────────────────────────── */
-
-emacs_value Fread_preserving_whitespace(emacs_env *env, ptrdiff_t nargs,
-                                        emacs_value *args, void *data) {
-  (void)data;
-  /* Same as cl-read for now */
-  return Fread(env, nargs, args, data);
 }
 
 /* ── cl-write ───────────────────────────────────────────────────────────
@@ -235,7 +206,7 @@ emacs_value Fprin1(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     return eintern(env, "nil");
   }
 
-  cl_stream_t *s = get_lisp_output_stream(env, args, nargs, 1);
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 1, "*standard-output*");
   if (!s || !stream_is_open(s)) {
     signal_error(env, "cl-prin1: stream is closed");
     return eintern(env, "nil");
@@ -261,7 +232,7 @@ emacs_value Fprinc(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     return eintern(env, "nil");
   }
 
-  cl_stream_t *s = get_lisp_output_stream(env, args, nargs, 1);
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 1, "*standard-output*");
   if (!s || !stream_is_open(s)) {
     signal_error(env, "cl-princ: stream is closed");
     return eintern(env, "nil");
@@ -297,7 +268,7 @@ emacs_value Fprint(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                     void *data) {
   (void)data;
   /* cl-print = print with newline before */
-  cl_stream_t *s = get_lisp_output_stream(env, args, nargs, 1);
+  cl_stream_t *s = get_stream_or_default(env, args, nargs, 1, "*standard-output*");
   if (s && stream_is_open(s)) {
     unsigned char nl = '\n';
     stream_write(s, &nl, 1);

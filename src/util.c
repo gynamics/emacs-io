@@ -32,12 +32,6 @@ char *estrdup(emacs_env *env, emacs_value val) {
   return buf;
 }
 
-ptrdiff_t estrlen(emacs_env *env, emacs_value val) {
-  ptrdiff_t len = 0;
-  env->copy_string_contents(env, val, NULL, &len);
-  return len;
-}
-
 bool estring_copy(emacs_env *env, emacs_value val, char *buf, ptrdiff_t *lenp) {
   return env->copy_string_contents(env, val, buf, lenp);
 }
@@ -65,14 +59,6 @@ emacs_value eint(emacs_env *env, intmax_t n) {
 
 intmax_t eint_extract(emacs_env *env, emacs_value v) {
   return env->extract_integer(env, v);
-}
-
-emacs_value euser_ptr(emacs_env *env, void *ptr, void (*fin)(void *)) {
-  return env->make_user_ptr(env, fin, ptr);
-}
-
-void *euser_ptr_get(emacs_env *env, emacs_value val) {
-  return env->get_user_ptr(env, val);
 }
 
 /* ── defun registration ───────────────────────────────────────────────── */
@@ -109,31 +95,24 @@ emacs_value euser_ptr_stream_make(emacs_env *env, cl_stream_t *s) {
   return env->make_user_ptr(env, stream_user_ptr_finalizer, s);
 }
 
+/* ── stream default resolution ──────────────────────────────────────── */
+
+cl_stream_t *get_stream_or_default(emacs_env *env, emacs_value *args,
+                                    ptrdiff_t nargs, int argidx,
+                                    const char *var) {
+  if (argidx < nargs && env->is_not_nil(env, args[argidx]))
+    return euser_ptr_stream_get(env, args[argidx]);
+
+  emacs_value sv = efuncall(env, "symbol-value", 1,
+                             (emacs_value[]){ eintern(env, var) });
+  return euser_ptr_stream_get(env, sv);
+}
+
 /* ── error signaling ──────────────────────────────────────────────────── */
 
 void signal_error(emacs_env *env, const char *msg) {
   emacs_value args[1];
   args[0] = estring(env, msg);
-  efuncall(env, "error", 1, args);
-}
-
-void signal_file_error(emacs_env *env, const char *msg) {
-  emacs_value args[1];
-  args[0] = estring(env, msg);
-  efuncall(env, "error", 1, args);
-}
-
-void signal_stream_error(emacs_env *env, cl_stream_t *s, const char *msg) {
-  (void)s;
-  emacs_value args[1];
-  args[0] = estring(env, msg);
-  efuncall(env, "error", 1, args);
-}
-
-void signal_end_of_file(emacs_env *env, cl_stream_t *s) {
-  (void)s;
-  emacs_value args[1];
-  args[0] = estring(env, "End of file on stream");
   efuncall(env, "error", 1, args);
 }
 
@@ -175,20 +154,6 @@ void strbuf_append(strbuf_t *sb, const char *s, ptrdiff_t len) {
   }
   memcpy(sb->data + sb->len, s, (size_t)len);
   sb->len += (size_t)len;
-  sb->data[sb->len] = '\0';
-}
-
-void strbuf_append_char(strbuf_t *sb, int c) {
-  size_t needed = sb->len + 2;
-  if (needed > sb->cap) {
-    size_t new_cap = sb->cap;
-    while (new_cap < needed) new_cap = (new_cap * 3) / 2;
-    char *new_data = realloc(sb->data, new_cap);
-    if (!new_data) return;
-    sb->data = new_data;
-    sb->cap = new_cap;
-  }
-  sb->data[sb->len++] = (char)c;
   sb->data[sb->len] = '\0';
 }
 

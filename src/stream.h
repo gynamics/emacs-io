@@ -14,7 +14,6 @@
 #define CL_STREAM_FLAG_OUTPUT      (1u << 1)
 #define CL_STREAM_FLAG_NONBLOCK    (1u << 2)
 #define CL_STREAM_FLAG_INTERACTIVE (1u << 3)
-#define CL_STREAM_FLAG_BINARY      (1u << 4)
 
 /* ── forward declarations ─────────────────────────────────────────────── */
 
@@ -57,7 +56,6 @@ typedef enum {
   CL_STREAM_KIND_MMAP,
   CL_STREAM_KIND_STRING_INPUT,
   CL_STREAM_KIND_STRING_OUTPUT,
-  CL_STREAM_KIND_BUFFER_INPUT,
 } cl_stream_kind_t;
 
 struct cl_stream {
@@ -73,7 +71,6 @@ struct cl_stream {
   int                    pushback_chars[256];
   int                    pushback_head;
   int                    pushback_tail;
-  int                    column;
 };
 
 /* ── concrete impl structs ───────────────────────────────────────────── */
@@ -125,15 +122,6 @@ typedef struct {
 } str_output_impl_t;
 
 #define STR_BLOCK_DEFAULT_CAP 65536
-
-/* buffer stream */
-typedef struct {
-  emacs_value  buffer;
-  ptrdiff_t    pos;
-  ptrdiff_t    end;
-  bool         owns_ref;
-} buffer_input_impl_t;
-
 #define BUFFER_STREAM_CHUNK 65536
 
 /* ── public stream API ───────────────────────────────────────────────── */
@@ -167,14 +155,8 @@ static inline bool stream_is_input(cl_stream_t *s)
 static inline bool stream_is_output(cl_stream_t *s)
   { return s != NULL && (s->flags & CL_STREAM_FLAG_OUTPUT); }
 
-static inline void stream_set_nonblock(cl_stream_t *s, bool val)
-  { if (val) s->flags |= CL_STREAM_FLAG_NONBLOCK;
-    else s->flags &= ~CL_STREAM_FLAG_NONBLOCK; }
-
 static inline bool stream_is_regular(cl_stream_t *s)
   { return s && S_ISREG(s->file_mode); }
-static inline bool stream_is_pipe(cl_stream_t *s)
-  { return s && S_ISFIFO(s->file_mode); }
 static inline bool stream_is_tty(cl_stream_t *s)
   { return s && (s->flags & CL_STREAM_FLAG_INTERACTIVE); }
 
