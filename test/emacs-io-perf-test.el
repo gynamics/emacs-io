@@ -2,7 +2,7 @@
 
 (require 'ert)
 
-(module-load (expand-file-name "emacs-io.so" (file-name-directory load-file-name)))
+(module-load (expand-file-name "../emacs-io.so" (file-name-directory load-file-name)))
 
 ;; ── helpers ──────────────────────────────────────────────────────────────
 

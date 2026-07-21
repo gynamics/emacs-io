@@ -4,12 +4,14 @@ LDFLAGS  ?= -shared
 LDLIBS   ?= -lpthread
 EMACS    ?= emacs
 
+SRC      = src
+TST      = test
 TARGET   = emacs-io.so
-OBJS     = emacs-io.o util.o stream.o fdstream.o strstream.o \
-           stdstream.o reader.o printer.o fileio.o lispio.o
-TEST     = emacs-io-test.el
-BENCH    = emacs-io-perf-test.el
-BENCH_LOOPS ?= 1
+OBJS     = $(SRC)/emacs-io.o $(SRC)/util.o $(SRC)/stream.o $(SRC)/fdstream.o \
+           $(SRC)/strstream.o $(SRC)/stdstream.o $(SRC)/reader.o $(SRC)/printer.o \
+           $(SRC)/fileio.o $(SRC)/lispio.o
+TEST     = $(TST)/emacs-io-test.el
+BENCH    = $(TST)/emacs-io-perf-test.el
 
 .PHONY: all clean check verify test bench
 
@@ -18,7 +20,7 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-%.o: %.c stream.h util.h Makefile
+$(SRC)/%.o: $(SRC)/%.c $(SRC)/stream.h $(SRC)/util.h Makefile
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
@@ -36,9 +38,9 @@ verify: $(TARGET)
 test: $(TARGET)
 	@rm -f $(TEST:.el=.elc)
 	@echo "=== unit tests ==="
-	@$(EMACS) --batch -Q -L . -l $(TEST) -f ert-run-tests-batch-and-exit
+	@$(EMACS) --batch -Q -L $(SRC) -L $(TST) -l $(TEST) -f ert-run-tests-batch-and-exit
 
 bench: $(TARGET)
 	@rm -f $(BENCH:.el=.elc)
 	@echo "=== benchmarks ==="
-	@$(EMACS) --batch -Q -L . -l $(BENCH) -f ert-run-tests-batch-and-exit
+	@$(EMACS) --batch -Q -L $(SRC) -L $(TST) -l $(BENCH) -f ert-run-tests-batch-and-exit
