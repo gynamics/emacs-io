@@ -24,123 +24,55 @@ static cl_stream_t *get_lisp_output_stream(emacs_env *env, emacs_value *args,
   return euser_ptr_stream_get(env, sv);
 }
 
-/* ── form-parsing state machine ─────────────────────────────────────────
-   Track parens, strings, comments to know when we have a complete form.
-   A form is complete when:
-     - depth == 0 after processing ''
-     - we have a top-level atom followed by a delimiter
-*/
+/* ── try-read-from-buffer ──────────────────────────────────────────────
+   Attempt to call read-from-string on sb->data.
+   On success: store the parsed value in *result, set *consumed to the
+   number of bytes consumed, and return true.
+   On end-of-file (incomplete form): return false.
+   On any other error: clear the exit, return false (caller should retry
+   or propagate). */
 
-typedef enum {
-  FS_TOP,              /* at top level, between forms */
-  FS_IN_ATOM,          /* inside a symbol/number */
-  FS_AFTER_ATOM_NEG,   /* just saw '-' that might start negative number */
-  FS_IN_STRING,        /* inside "..." */
-  FS_AFTER_BACKSLASH,  /* inside string, just saw \ */
-  FS_IN_COMMENT,       /* inside ; comment */
-  FS_AFTER_SHARP,      /* just saw # */
-  FS_AFTER_QUOTE,      /* just saw ' */
-} form_state_t;
+static bool try_read_from_buffer(emacs_env *env, strbuf_t *sb,
+                                  emacs_value *result, ptrdiff_t *consumed) {
+  emacs_value estr = env->make_string(env, sb->data, (ptrdiff_t)sb->len);
+  emacs_value read_args[2];
+  read_args[0] = estr;
+  read_args[1] = eint(env, 0);
 
-static bool is_delimiter(char c) {
-  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
-}
+  emacs_value raw = env->funcall(env, eintern(env, "read-from-string"),
+                                  2, read_args);
 
-static bool is_atom_start(char c) {
-  return c != '(' && c != ')' && c != '"' && c != ';'
-         && c != '#' && c != '\'' && !is_delimiter(c);
-}
-
-static bool form_is_complete(const char *text, ptrdiff_t len) {
-  int depth = 0;
-  form_state_t state = FS_TOP;
-
-  for (ptrdiff_t i = 0; i < len; i++) {
-    char c = text[i];
-
-    switch (state) {
-    case FS_TOP:
-      if (c == '(') { depth++; }
-      else if (c == ')') { depth--; if (depth < 0) return true; }
-      else if (c == '"') { state = FS_IN_STRING; }
-      else if (c == ';') { state = FS_IN_COMMENT; }
-      else if (c == '#') { state = FS_AFTER_SHARP; }
-      else if (c == '\'') { state = FS_AFTER_QUOTE; }
-      else if (is_delimiter(c)) { /* skip whitespace */ }
-      else if (c == '-') { state = FS_AFTER_ATOM_NEG; }
-      else { state = FS_IN_ATOM; }
-      break;
-
-    case FS_IN_ATOM:
-      if (is_delimiter(c) || c == '(' || c == ')' || c == ';'
-          || c == '"' || c == '\'') {
-        /* atom ends here; process the delimiter in FS_TOP */
-        state = FS_TOP;
-        i--; /* re-process this char as FS_TOP */
-      }
-      /* else continue in atom */
-      break;
-
-    case FS_AFTER_ATOM_NEG:
-      /* '-' followed by digit = negative number, else standalone symbol */
-      if (c >= '0' && c <= '9') { state = FS_IN_ATOM; }
-      else if (is_delimiter(c) || c == '(' || c == ')' || c == ';'
-               || c == '"' || c == '\'') {
-        /* '-' as a standalone symbol ended */
-        state = FS_TOP;
-        i--;
-      } else { state = FS_IN_ATOM; } /* '-abc' is a symbol */
-      break;
-
-    case FS_IN_STRING:
-      if (c == '\\') { state = FS_AFTER_BACKSLASH; }
-      else if (c == '"') { state = FS_TOP; }
-      break;
-
-    case FS_AFTER_BACKSLASH:
-      state = FS_IN_STRING; /* skip the escaped char */
-      break;
-
-    case FS_IN_COMMENT:
-      if (c == '\n') { state = FS_TOP; }
-      break;
-
-    case FS_AFTER_SHARP:
-      if (c == '\'') { /* #'function */ depth++; state = FS_TOP; }
-      else if (c == '(') { /* #(vector */ depth++; state = FS_TOP; }
-      else if (c == '\\') { state = FS_IN_ATOM; } /* #\char */
-      else if (is_atom_start(c)) { state = FS_IN_ATOM; } /* #:symbol, #0... */
-      else { state = FS_TOP; i--; } /* # alone is weird, treat as atomic */
-      break;
-
-    case FS_AFTER_QUOTE:
-      if (c == '(') { depth++; state = FS_TOP; } /* '( */
-      else { state = FS_IN_ATOM; } /* 'symbol */
-      break;
-    }
+  enum emacs_funcall_exit exit = env->non_local_exit_check(env);
+  if (exit == emacs_funcall_exit_return) {
+    /* Success: raw = (VALUE . POSITION).  Extract car and consumed count. */
+    emacs_value pair = raw;
+    *result = efuncall(env, "car", 1, &pair);
+    emacs_value pos  = efuncall(env, "cdr", 1, &pair);
+    *consumed = eint_extract(env, pos);
+    return true;
   }
 
-  return depth == 0 && state == FS_TOP;
-}
+  /* read-from-string signalled an error.  Detect end-of-file (incomplete form). */
+  emacs_value sym = eintern(env, "nil");
+  emacs_value data = eintern(env, "nil");
+  env->non_local_exit_get(env, &sym, &data);
+  bool is_eof = env->eq(env, sym, eintern(env, "end-of-file"));
+  env->non_local_exit_clear(env);
 
-/* Skip leading whitespace and return true if content left */
-static bool skip_whitespace(strbuf_t *sb) {
-  ptrdiff_t i = 0;
-  while (i < (ptrdiff_t)sb->len &&
-         (sb->data[i] == ' ' || sb->data[i] == '\t' ||
-          sb->data[i] == '\n' || sb->data[i] == '\r' ||
-          sb->data[i] == '\f')) i++;
-  if (i > 0) {
-    memmove(sb->data, sb->data + i, sb->len - (size_t)i);
-    sb->len -= (size_t)i;
-    sb->data[sb->len] = '\0';
-  }
-  return sb->len > 0;
+  if (is_eof)
+    return false;  /* incomplete — need more data */
+
+  /* Some other read error (invalid syntax, etc.) — re-signal it. */
+  env->non_local_exit_signal(env, sym, data);
+  *consumed = 0;
+  return false;
 }
 
 /* ── cl-read ────────────────────────────────────────────────────────────
-   Reads characters from stream, accumulates into a buffer, and when a
-   complete Lisp form is found, delegates to Emacs read-from-string. */
+   Reads characters from STREAM, feeding them incrementally to Emacs'
+   read-from-string.  Emacs handles all form parsing; we are just a
+   transport layer.  Unconsumed bytes after a successful parse are
+   pushed back into the stream's ring buffer. */
 
 emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                   void *data) {
@@ -155,19 +87,49 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   strbuf_t *sb = strbuf_create(256);
   if (!sb) { signal_error(env, "Memory allocation failed"); return eintern(env, "nil"); }
 
-  unsigned char ch;
+  emacs_value result = eintern(env, "nil");
+  ptrdiff_t consumed = 0;
+  bool parsed = false;
+  unsigned char chunk[4096];
 
-  while (1) {
-    ptrdiff_t r = stream_read(s, &ch, 1);
-    if (r <= 0) {
-      /* EOF — if we have content, treat it as a complete form */
-      if (sb->len > 0) {
-        /* strip trailing whitespace */
-        while (sb->len > 0 && is_delimiter(sb->data[sb->len - 1]))
-          sb->data[--sb->len] = '\0';
-        if (sb->len > 0) break;
+  while (!parsed) {
+    /* try with what we have */
+    if (sb->len > 0) {
+      if (try_read_from_buffer(env, sb, &result, &consumed)) {
+        parsed = true;
+        break;
       }
-      /* no complete form — signal EOF */
+      /* if a non-eof error was re-signalled, bail out */
+      if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
+        strbuf_free(sb);
+        return eintern(env, "nil");
+      }
+    }
+
+    /* read more data from stream */
+    ptrdiff_t r = stream_read(s, chunk, sizeof(chunk));
+    if (r <= 0) {
+      /* EOF — strip trailing whitespace and try one last time */
+      if (sb->len > 0) {
+        while (sb->len > 0 &&
+               (sb->data[sb->len - 1] == ' '  ||
+                sb->data[sb->len - 1] == '\t' ||
+                sb->data[sb->len - 1] == '\n' ||
+                sb->data[sb->len - 1] == '\r' ||
+                sb->data[sb->len - 1] == '\f'))
+          sb->data[--sb->len] = '\0';
+        if (sb->len > 0) {
+          if (try_read_from_buffer(env, sb, &result, &consumed)) {
+            parsed = true;
+            break;
+          }
+          if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
+            strbuf_free(sb);
+            return eintern(env, "nil");
+          }
+        }
+      }
+      /* nothing parsed — signal EOF or return eof-value */
       strbuf_free(sb);
       if (nargs >= 2 && !env->is_not_nil(env, args[1]))
         return (nargs >= 3) ? args[2] : eintern(env, "nil");
@@ -175,27 +137,18 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       return eintern(env, "nil");
     }
 
-    strbuf_append_char(sb, ch);
-
-    if (form_is_complete(sb->data, (ptrdiff_t)sb->len)) {
-      if (skip_whitespace(sb) && form_is_complete(sb->data, (ptrdiff_t)sb->len))
-        break;
-      if (sb->len > 0 && form_is_complete(sb->data, (ptrdiff_t)sb->len))
-        break;
-    }
+    strbuf_append(sb, (const char *)chunk, r);
   }
 
-  /* Delegate to Emacs read-from-string */
-  emacs_value estr = env->make_string(env, sb->data, (ptrdiff_t)sb->len);
+  /* parsed successfully — push back unconsumed bytes */
+  if (consumed < (ptrdiff_t)sb->len) {
+    /* push in forward order; unread enqueues at tail, read dequeues from head (FIFO) */
+    for (ptrdiff_t i = consumed; i < (ptrdiff_t)sb->len; i++)
+      stream_unread(s, (unsigned char)sb->data[i]);
+  }
+
   strbuf_free(sb);
-
-  emacs_value read_args[2];
-  read_args[0] = estr;
-  read_args[1] = eint(env, 0);
-  emacs_value result = efuncall(env, "read-from-string", 2, read_args);
-
-  /* read-from-string returns (object . position), extract car */
-  return efuncall(env, "car", 1, &result);
+  return result;
 }
 
 /* ── cl-read-from-string ─────────────────────────────────────────────── */
