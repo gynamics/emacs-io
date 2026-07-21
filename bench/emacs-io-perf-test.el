@@ -237,21 +237,18 @@
 ;; ── 10 MB string input, bulk read into vector ───────────────────────────
 
 (ert-deftest emacs-io-perf-bulk-read-10m ()
-  "10 MB bulk read into vector, stream vs buffer (single call on both sides)."
+  "10 MB bulk read into string, stream cl-read-string vs buffer-string."
   (emacs-io-perf--skip-unless-full
    (let ((data (make-string (* 10 1024 1024) ?x)))
      (emacs-io-perf--report "bulk-read 10M"
        (emacs-io-perf--time (lambda ()
                               (emacs-io-perf--with-string-input data
-                                (let ((v (make-vector (length data) 0)))
-                                  (cl-read-sequence v stream) v))))
+                                (cl-read-string (length data) stream))))
        (emacs-io-perf--time (lambda ()
                               (with-temp-buffer
                                 (insert data)
-                                (vconcat (buffer-string)))))
-       ;; vconcat of buffer-string is a single C call;
-       ;; cl-read-sequence fills a vector element-by-element.
-       nil))))
+                                (buffer-string))))
+       :assert))))
 
 ;; ── 10 MB file write + read round-trip ──────────────────────────────────
 
@@ -266,18 +263,16 @@
            (emacs-io-perf--time (lambda ()
                                   (let ((s (cl-open fs :direction :output :if-exists :supersede)))
                                     (cl-write-string data s) (cl-close s))
-                                  (let* ((s (cl-open fs :direction :input))
-                                         (v (make-vector (length data) 0)))
-                                    (cl-read-sequence v s) (cl-close s) v)))
+                                  (let ((s (cl-open fs :direction :input)))
+                                    (prog1 (cl-read-string (length data) s)
+                                      (cl-close s)))))
            (emacs-io-perf--time (lambda ()
                                   (with-temp-buffer (insert data)
                                     (write-region (point-min) (point-max) fb nil 'silent))
                                   (with-temp-buffer (insert-file-contents fb)
-                                    (vconcat (buffer-string)))))
-           ;; Emacs write-region+insert-file-contents use mmap/kernel
-           ;; page cache directly; stream goes through userspace buffers.
-           nil)
-       (ignore-errors (delete-file fs) (delete-file fb))))))
+                                     (vconcat (buffer-string)))))
+            :assert)
+        (ignore-errors (delete-file fs) (delete-file fb))))))
 
 ;; ── Block-chain advantage: many medium writes (no realloc copies) ────────
 

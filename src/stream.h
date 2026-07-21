@@ -61,7 +61,7 @@ struct cl_stream {
   mode_t                 file_mode;   /* from fstat, 0 if not fd-backed */
 
   /* pushback ring buffer for unread */
-  int                    pushback_chars[16];
+  int                    pushback_chars[256];
   int                    pushback_head;
   int                    pushback_tail;
   int                    column;

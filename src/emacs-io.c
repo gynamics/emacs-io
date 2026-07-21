@@ -22,6 +22,8 @@ extern emacs_value Flisten(emacs_env *env, ptrdiff_t nargs,
                             emacs_value *args, void *data);
 extern emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs,
                                    emacs_value *args, void *data);
+extern emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs,
+                                 emacs_value *args, void *data);
 
 /* printer.c */
 extern emacs_value Fwrite_char(emacs_env *env, ptrdiff_t nargs,
@@ -164,6 +166,15 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "Keywords :START and :END delimit the affected subsequence.\n"
         "Returns the index of the first element not updated.\n"
         "\n(fn SEQUENCE STREAM &key START END)", NULL);
+
+  defun(env, "cl-read-string", Fread_string, 2, 5,
+        "Read up to N bytes from STREAM and return them as a unibyte string.\n"
+        "\n"
+        "Fewer bytes may be returned if end of file is reached.\n"
+        "If EOF-ERROR-P is nil and end of file is reached, return EOF-VALUE.\n"
+        "Use this for bulk reads; it avoids per-element overhead of\n"
+        "`cl-read-sequence' for large data.\n"
+        "\n(fn N STREAM &optional EOF-ERROR-P EOF-VALUE)", NULL);
 
   /* ── printer ─────────────────────────────────────────────────────── */
   defun(env, "cl-write-char", Fwrite_char, 1, 2,

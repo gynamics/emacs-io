@@ -18,7 +18,7 @@ ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
     unsigned char *dest = (unsigned char *)buf;
     while (s->pushback_head != s->pushback_tail && count < n) {
       dest[count++] = (unsigned char)s->pushback_chars[s->pushback_head];
-      s->pushback_head = (s->pushback_head + 1) & 15;
+      s->pushback_head = (s->pushback_head + 1) & 255;
     }
     UNLOCK(s);
     return count;
@@ -78,7 +78,7 @@ bool stream_listen(cl_stream_t *s) {
 void stream_unread(cl_stream_t *s, int ch) {
   if (!s) return;
   LOCK(s);
-  int next = (s->pushback_tail + 1) & 15;
+  int next = (s->pushback_tail + 1) & 255;
   if (next == s->pushback_head) { UNLOCK(s); return; } /* full */
   s->pushback_chars[s->pushback_tail] = ch;
   s->pushback_tail = next;
