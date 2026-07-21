@@ -247,16 +247,34 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     return eintern(env, "nil");
   }
 
-  ptrdiff_t n = (ptrdiff_t)eint_extract(env, args[0]);
-  if (n <= 0) return env->make_string(env, "", 0);
+  ptrdiff_t want = (ptrdiff_t)eint_extract(env, args[0]);
+  if (want <= 0) return env->make_string(env, "", 0);
 
   cl_stream_t *s = euser_ptr_stream_get(env, args[1]);
   check_open(env, s, "cl-read-string");
 
-  unsigned char *buf = malloc((size_t)n);
+  /* try zero-copy via direct mapping (mmap streams) */
+  const void *daddr = NULL;
+  size_t dlen = 0;
+  if (stream_direct(s, &daddr, &dlen)) {
+    size_t to_read = (size_t)want < dlen ? (size_t)want : dlen;
+    if (to_read == 0) {
+      if (nargs >= 4 && !env->is_not_nil(env, args[2]))
+        return (nargs >= 5) ? args[3] : eintern(env, "nil");
+      signal_end_of_file(env, s);
+      return eintern(env, "nil");
+    }
+    emacs_value result = env->make_unibyte_string(env, (const char *)daddr,
+                                                   (ptrdiff_t)to_read);
+    stream_advance(s, (ptrdiff_t)to_read);
+    return result;
+  }
+
+  /* fallback: read into temp buffer */
+  unsigned char *buf = malloc((size_t)want);
   if (!buf) { signal_error(env, "Memory allocation failed"); return eintern(env, "nil"); }
 
-  ptrdiff_t r = stream_read(s, buf, n);
+  ptrdiff_t r = stream_read(s, buf, want);
   if (r <= 0) {
     free(buf);
     if (nargs >= 4 && !env->is_not_nil(env, args[2]))

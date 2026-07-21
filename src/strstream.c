@@ -9,15 +9,19 @@ static ptrdiff_t sis_read(cl_stream_t *s, void *buf, ptrdiff_t n);
 static int       sis_close(cl_stream_t *s);
 static bool      sis_listen(cl_stream_t *s);
 static void      sis_destroy(cl_stream_t *s);
+static bool      sis_direct(cl_stream_t *s, const void **addr, size_t *len);
+static void      sis_advance(cl_stream_t *s, ptrdiff_t n);
 
 static const cl_stream_ops_t string_input_ops = {
-  .read    = sis_read,
-  .write   = NULL,
-  .close   = sis_close,
-  .flush   = NULL,
-  .finish  = NULL,
-  .listen  = sis_listen,
-  .destroy = sis_destroy,
+  .read     = sis_read,
+  .write    = NULL,
+  .close    = sis_close,
+  .flush    = NULL,
+  .finish   = NULL,
+  .listen   = sis_listen,
+  .destroy  = sis_destroy,
+  .direct   = sis_direct,
+  .advance  = sis_advance,
 };
 
 /* ── string-output ops ───────────────────────────────────────────────── */
@@ -87,6 +91,21 @@ static void sis_destroy(cl_stream_t *s) {
 static bool sis_listen(cl_stream_t *s) {
   string_input_impl_t *si = (string_input_impl_t *)s->impl;
   return si != NULL && si->pos < si->len;
+}
+
+static bool sis_direct(cl_stream_t *s, const void **addr, size_t *len) {
+  string_input_impl_t *si = (string_input_impl_t *)s->impl;
+  if (!si || si->pos >= si->len) return false;
+  *addr = si->data + si->pos;
+  *len = si->len - si->pos;
+  return true;
+}
+
+static void sis_advance(cl_stream_t *s, ptrdiff_t n) {
+  string_input_impl_t *si = (string_input_impl_t *)s->impl;
+  if (!si || n <= 0) return;
+  si->pos += (size_t)n;
+  if (si->pos > si->len) si->pos = si->len;
 }
 
 /* ── string output: block-chain (no realloc copying) ────────────────────*/
@@ -195,15 +214,19 @@ static ptrdiff_t mmap_read(cl_stream_t *s, void *buf, ptrdiff_t n);
 static int       mmap_close(cl_stream_t *s);
 static bool      mmap_listen(cl_stream_t *s);
 static void      mmap_destroy(cl_stream_t *s);
+static bool      mmap_direct(cl_stream_t *s, const void **addr, size_t *len);
+static void      mmap_advance(cl_stream_t *s, ptrdiff_t n);
 
 static const cl_stream_ops_t mmap_stream_ops = {
-  .read    = mmap_read,
-  .write   = NULL,
-  .close   = mmap_close,
-  .flush   = NULL,
-  .finish  = NULL,
-  .listen  = mmap_listen,
-  .destroy = mmap_destroy,
+  .read     = mmap_read,
+  .write    = NULL,
+  .close    = mmap_close,
+  .flush    = NULL,
+  .finish   = NULL,
+  .listen   = mmap_listen,
+  .destroy  = mmap_destroy,
+  .direct   = mmap_direct,
+  .advance  = mmap_advance,
 };
 
 #include <sys/mman.h>
@@ -272,6 +295,21 @@ static void mmap_destroy(cl_stream_t *s) {
 static bool mmap_listen(cl_stream_t *s) {
   mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
   return mi != NULL && mi->pos < mi->size;
+}
+
+static bool mmap_direct(cl_stream_t *s, const void **addr, size_t *len) {
+  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
+  if (!mi || mi->pos >= mi->size) return false;
+  *addr = (const char *)mi->addr + mi->pos;
+  *len = mi->size - mi->pos;
+  return true;
+}
+
+static void mmap_advance(cl_stream_t *s, ptrdiff_t n) {
+  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
+  if (!mi || n <= 0) return;
+  mi->pos += (size_t)n;
+  if (mi->pos > mi->size) mi->pos = mi->size;
 }
 
 /* ── buffer input stream ─────────────────────────────────────────────── */

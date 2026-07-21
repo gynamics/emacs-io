@@ -30,15 +30,19 @@ typedef int       (*stream_flush_fn)(cl_stream_t *s);
 typedef int       (*stream_finish_fn)(cl_stream_t *s);
 typedef bool      (*stream_listen_fn)(cl_stream_t *s);
 typedef void      (*stream_destroy_fn)(cl_stream_t *s);
+typedef bool      (*stream_direct_fn)(cl_stream_t *s, const void **addr, size_t *len);
+typedef void      (*stream_advance_fn)(cl_stream_t *s, ptrdiff_t n);
 
 struct cl_stream_ops {
-  stream_read_fn    read;
-  stream_write_fn   write;
-  stream_close_fn   close;
-  stream_flush_fn   flush;
-  stream_finish_fn  finish;
-  stream_listen_fn  listen;
-  stream_destroy_fn destroy;
+  stream_read_fn     read;
+  stream_write_fn    write;
+  stream_close_fn    close;
+  stream_flush_fn    flush;
+  stream_finish_fn   finish;
+  stream_listen_fn   listen;
+  stream_destroy_fn  destroy;
+  stream_direct_fn   direct;
+  stream_advance_fn  advance;
 };
 
 /* ── core stream object ──────────────────────────────────────────────── */
@@ -143,6 +147,8 @@ int       stream_flush(cl_stream_t *s);
 int       stream_finish(cl_stream_t *s);
 bool      stream_listen(cl_stream_t *s);
 void      stream_unread(cl_stream_t *s, int ch);
+bool      stream_direct(cl_stream_t *s, const void **addr, size_t *len);
+void      stream_advance(cl_stream_t *s, ptrdiff_t n);
 
 emacs_value str_output_to_string(emacs_env *env, cl_stream_t *s);
 

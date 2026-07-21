@@ -79,8 +79,24 @@ void stream_unread(cl_stream_t *s, int ch) {
   if (!s) return;
   LOCK(s);
   int next = (s->pushback_tail + 1) & 255;
-  if (next == s->pushback_head) { UNLOCK(s); return; } /* full */
+  if (next == s->pushback_head) { UNLOCK(s); return; }
   s->pushback_chars[s->pushback_tail] = ch;
   s->pushback_tail = next;
+  UNLOCK(s);
+}
+
+bool stream_direct(cl_stream_t *s, const void **addr, size_t *len) {
+  if (!s || !s->ops || !s->ops->direct || !addr || !len) return false;
+  if (!atomic_load(&s->open)) return false;
+  LOCK(s);
+  bool ok = s->ops->direct(s, addr, len);
+  UNLOCK(s);
+  return ok;
+}
+
+void stream_advance(cl_stream_t *s, ptrdiff_t n) {
+  if (!s || n <= 0 || !s->ops || !s->ops->advance) return;
+  LOCK(s);
+  s->ops->advance(s, n);
   UNLOCK(s);
 }
