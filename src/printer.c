@@ -187,12 +187,10 @@ emacs_value Fclear_output(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                            void *data) {
   (void)data;
   /* (cl-clear-output &optional stream)
-     Clear pending output buffer. For fd streams, discard write buffer. */
+     Clear pending output buffer. */
   cl_stream_t *s = get_output_stream(env, args, nargs, 0);
-  if (s && stream_is_open(s) && s->impl) {
-    fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
-    fi->wlen = 0;
-  }
+  if (s && stream_is_open(s) && s->ops && s->ops->clear_output)
+    s->ops->clear_output(s);
   return eintern(env, "nil");
 }
 
@@ -204,10 +202,14 @@ emacs_value Fclear_input(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   /* (cl-clear-input &optional stream)
      Discard pending input buffer. */
   cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-input*");
-  if (s && stream_is_open(s) && s->impl) {
-    fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
-    fi->rpos = 0;
-    fi->rlen = 0;
+  if (s && stream_is_open(s)) {
+    /* clear pushback ring */
+    while (s->pushback_head != s->pushback_tail)
+      s->pushback_head = (s->pushback_head + 1) & 255;
+    s->pushback_head = s->pushback_tail = 0;
+    /* clear impl-specific buffers */
+    if (s->ops && s->ops->clear_input)
+      s->ops->clear_input(s);
   }
   return eintern(env, "nil");
 }

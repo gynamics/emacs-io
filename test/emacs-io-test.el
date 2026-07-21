@@ -362,5 +362,230 @@
     (cl-close stream)
     (should-error (cl-read-char stream))))
 
+(ert-deftest emacs-io-test-write-after-close-signals-error ()
+  "Test that writing to a closed stream signals an error."
+  (let ((stream (cl-make-string-output-stream)))
+    (cl-close stream)
+    (should-error (cl-write-char ?x stream))))
+
+;; ── cl-read-string ────────────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-read-string-basic ()
+  "Test cl-read-string reads exact byte count."
+  (emacs-io-test--with-string-input "abcdef"
+    (should (equal (cl-read-string 3 stream) "abc"))
+    (should (equal (cl-read-string 3 stream) "def"))))
+
+(ert-deftest emacs-io-test-read-string-eof ()
+  "Test cl-read-string with fewer bytes than requested."
+  (emacs-io-test--with-string-input "hi"
+    (should (equal (cl-read-string 10 stream nil 'eof) "hi"))
+    (should (equal (cl-read-string 10 stream nil 'eof) 'eof))))
+
+(ert-deftest emacs-io-test-read-string-empty ()
+  "Test cl-read-string on empty stream."
+  (emacs-io-test--with-string-input ""
+    (should (equal (cl-read-string 10 stream nil :empty) :empty))))
+
+(ert-deftest emacs-io-test-read-string-zero ()
+  "Test cl-read-string n=0 returns empty string."
+  (emacs-io-test--with-string-input "data"
+    (should (equal (cl-read-string 0 stream) ""))))
+
+;; FIXME: unibyte with embedded NUL requires strncpy in make-string-input
+;; (ert-deftest emacs-io-test-read-string-unibyte () ...)
+
+;; ── cl-unread-char ────────────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-unread-char ()
+  "Test cl-unread-char puts character back."
+  (emacs-io-test--with-string-input "abc"
+    (should (equal (cl-read-char stream) ?a))
+    (cl-unread-char ?a stream)
+    (should (equal (cl-read-char stream) ?a))
+    (should (equal (cl-read-char stream) ?b))))
+
+(ert-deftest emacs-io-test-listen-after-unread ()
+  "Test cl-listen returns t after unread-char."
+  (emacs-io-test--with-string-input "x"
+    (cl-read-char stream)
+    (should-not (cl-listen stream))
+    (cl-unread-char ?x stream)
+    (should (cl-listen stream))))
+
+;; ── write-string with start/end ───────────────────────────────────────────
+
+(ert-deftest emacs-io-test-write-string-substring ()
+  "Test cl-write-string with :start and :end."
+  (let ((result (emacs-io-test--with-string-output
+                  (cl-write-string "abcdef" stream :start 1 :end 4))))
+    (should (equal result "bcd"))))
+
+(ert-deftest emacs-io-test-write-string-start-only ()
+  "Test cl-write-string with :start only."
+  (let ((result (emacs-io-test--with-string-output
+                  (cl-write-string "abcdef" stream :start 3))))
+    (should (equal result "def"))))
+
+;; ── string output :size hint ──────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-sized-output-exact ()
+  "Test :size hint with exact-fit write."
+  (let* ((s (cl-make-string-output-stream :size 5)))
+    (cl-write-string "hello" s)
+    (should (equal (cl-get-output-stream-string s) "hello"))
+    (cl-close s)))
+
+(ert-deftest emacs-io-test-sized-output-overflow ()
+  "Test :size hint with data exceeding pre-allocated block."
+  (let* ((s (cl-make-string-output-stream :size 3)))
+    (cl-write-string "hello" s)
+    (should (equal (cl-get-output-stream-string s) "hello"))
+    (cl-close s)))
+
+(ert-deftest emacs-io-test-sized-output-multi-write ()
+  "Test :size hint with multiple writes."
+  (let* ((s (cl-make-string-output-stream :size 6)))
+    (cl-write-string "abc" s)
+    (cl-write-string "def" s)
+    (should (equal (cl-get-output-stream-string s) "abcdef"))
+    (cl-close s)))
+
+;; ── cl-clear-output / cl-clear-input ─────────────────────────────────────
+
+(ert-deftest emacs-io-test-clear-output ()
+  "Test cl-clear-output discards pending output."
+  (let ((s (cl-make-string-output-stream)))
+    (cl-write-string "pending" s)
+    (cl-clear-output s)
+    (should (equal (cl-get-output-stream-string s) ""))
+    (cl-close s)))
+
+(ert-deftest emacs-io-test-clear-input ()
+  "Test cl-clear-input discards buffered input."
+  (emacs-io-test--with-string-input "data"
+    (cl-read-char stream)
+    (cl-unread-char ?x stream)
+    (cl-clear-input stream)
+    (should-not (cl-listen stream))))
+
+;; ── cl-force-output / cl-finish-output on string streams ──────────────────
+
+(ert-deftest emacs-io-test-force-output-noop ()
+  "Test cl-force-output on string stream does not crash."
+  (let ((s (cl-make-string-output-stream)))
+    (cl-write-string "x" s)
+    (cl-force-output s)  ;; no-op for string output
+    (should (equal (cl-get-output-stream-string s) "x"))
+    (cl-close s)))
+
+;; ── cl-print ──────────────────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-cl-print ()
+  "Test cl-print outputs newline before object."
+  (let ((result (emacs-io-test--with-string-output
+                  (cl-print "hello" stream))))
+    (should (string-prefix-p "\n\"hello\"" result))))
+
+;; ── cl-read-preserving-whitespace ─────────────────────────────────────────
+
+(ert-deftest emacs-io-test-read-preserving-whitespace ()
+  "Test cl-read-preserving-whitespace."
+  (emacs-io-test--with-string-input "  hello"
+    (should (equal (cl-read-preserving-whitespace stream) 'hello))))
+
+;; ── cl-write ──────────────────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-cl-write ()
+  "Test cl-write with :stream keyword."
+  (let ((result (emacs-io-test--with-string-output
+                  (cl-write "hello" :stream stream))))
+    (should (equal result "\"hello\""))))
+
+;; ── cl-read-byte eof-error-p ─────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-read-byte-eof-error ()
+  "Test cl-read-byte signals error on EOF by default."
+  (emacs-io-test--with-string-input ""
+    (should-error (cl-read-byte stream))))
+
+;; ── read-line with bulk chunk boundary ────────────────────────────────────
+
+(ert-deftest emacs-io-test-read-line-long ()
+  "Test cl-read-line on a line longer than 4KB bulk chunk."
+  (let ((long-line (concat (make-string 5000 ?x) "\nrest")))
+    (emacs-io-test--with-string-input long-line
+      (let ((result (cl-read-line stream)))
+        (should (equal (length (car result)) 5000))
+        (should (equal (car result) (make-string 5000 ?x)))
+        (should (equal (cl-read-line stream) '("rest" t)))))))
+
+;; ── mixed output types ────────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-mixed-output ()
+  "Test mixing write-char, write-string, and write-byte."
+  (let ((result (emacs-io-test--with-string-output
+                  (cl-write-char ?a stream)
+                  (cl-write-string "bc" stream)
+                  (cl-write-byte 100 stream)
+                  (cl-write-line "" stream))))
+    (should (equal result "abcd\n"))))
+
+;; ── empty string edge cases ───────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-empty-string-input ()
+  "Test reading from an empty string stream."
+  (emacs-io-test--with-string-input ""
+    (should (equal (cl-read-char stream nil :eof) :eof))
+    (should (equal (cl-read-line stream nil :eof) :eof))
+    (should (equal (cl-read-byte stream nil :eof) :eof))
+    (should (equal (cl-read stream nil :eof) :eof))))
+
+(ert-deftest emacs-io-test-empty-write-string ()
+  "Test writing an empty string."
+  (let ((result (emacs-io-test--with-string-output
+                  (cl-write-string "" stream)
+                  (cl-write-string "a" stream))))
+    (should (equal result "a"))))
+
+;; ── file type predicates ──────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-file-regular-p ()
+  "Test cl-file-regular-p on a temp file."
+  (emacs-io-test--with-temp-file fname
+    (with-temp-file fname (insert "test"))
+    (let ((s (cl-open fname :direction :input)))
+      (unwind-protect
+          (should (cl-file-regular-p s))
+        (cl-close s)))))
+
+(ert-deftest emacs-io-test-file-tty-p ()
+  "Test cl-file-tty-p is nil for a regular file."
+  (emacs-io-test--with-temp-file fname
+    (with-temp-file fname (insert "test"))
+    (let ((s (cl-open fname :direction :input)))
+      (unwind-protect
+          (should-not (cl-file-tty-p s))
+        (cl-close s)))))
+
+;; ── write-sequence partial read ───────────────────────────────────────────
+
+(ert-deftest emacs-io-test-read-sequence-partial ()
+  "Test cl-read-sequence returns index on partial fill."
+  (emacs-io-test--with-string-input "ab"
+    (let ((v (make-vector 5 0)))
+      (should (equal (cl-read-sequence v stream) 2))
+      (should (equal (aref v 0) ?a))
+      (should (equal (aref v 1) ?b))
+      (should (equal (aref v 2) 0)))))
+
+;; ── read-char eof-error-p ─────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-read-char-eof-error ()
+  "Test cl-read-char signals error on EOF by default."
+  (emacs-io-test--with-string-input "x"
+    (cl-read-char stream)
+    (should-error (cl-read-char stream))))
+
 (provide 'emacs-io-test)
 ;;; emacs-io-test.el ends here

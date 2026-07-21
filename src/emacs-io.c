@@ -184,7 +184,7 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "Returns CHARACTER.\n"
         "\n(fn CHARACTER &optional STREAM)", NULL);
 
-  defun(env, "cl-write-string", Fwrite_string, 1, 5,
+  defun(env, "cl-write-string", Fwrite_string, 1, 6,
         "Write STRING to STREAM.\n"
         "\n"
         "Keywords :START and :END delimit the substring to write.\n"

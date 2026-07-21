@@ -260,7 +260,7 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     size_t to_read = (size_t)want < dlen ? (size_t)want : dlen;
     if (to_read == 0) {
       if (nargs >= 4 && !env->is_not_nil(env, args[2]))
-        return (nargs >= 5) ? args[3] : eintern(env, "nil");
+        return (nargs >= 4) ? args[3] : eintern(env, "nil");
       signal_end_of_file(env, s);
       return eintern(env, "nil");
     }
@@ -278,7 +278,7 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   if (r <= 0) {
     free(buf);
     if (nargs >= 4 && !env->is_not_nil(env, args[2]))
-      return (nargs >= 5) ? args[3] : eintern(env, "nil");
+      return (nargs >= 4) ? args[3] : eintern(env, "nil");
     signal_end_of_file(env, s);
     return eintern(env, "nil");
   }

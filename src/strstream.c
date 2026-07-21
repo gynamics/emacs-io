@@ -11,17 +11,19 @@ static bool      sis_listen(cl_stream_t *s);
 static void      sis_destroy(cl_stream_t *s);
 static bool      sis_direct(cl_stream_t *s, const void **addr, size_t *len);
 static void      sis_advance(cl_stream_t *s, ptrdiff_t n);
+static void      sis_clear_input(cl_stream_t *s);
 
 static const cl_stream_ops_t string_input_ops = {
-  .read     = sis_read,
-  .write    = NULL,
-  .close    = sis_close,
-  .flush    = NULL,
-  .finish   = NULL,
-  .listen   = sis_listen,
-  .destroy  = sis_destroy,
-  .direct   = sis_direct,
-  .advance  = sis_advance,
+  .read        = sis_read,
+  .write       = NULL,
+  .close       = sis_close,
+  .flush       = NULL,
+  .finish      = NULL,
+  .listen      = sis_listen,
+  .destroy     = sis_destroy,
+  .direct      = sis_direct,
+  .advance     = sis_advance,
+  .clear_input = sis_clear_input,
 };
 
 /* ── string-output ops ───────────────────────────────────────────────── */
@@ -30,6 +32,7 @@ static ptrdiff_t sos_write(cl_stream_t *s, const void *buf, ptrdiff_t n);
 static int       sos_close(cl_stream_t *s);
 static void      sos_destroy(cl_stream_t *s);
 static ptrdiff_t sos_write_string(emacs_env *env, cl_stream_t *s, emacs_value str);
+static void      sos_clear_output(cl_stream_t *s);
 
 static const cl_stream_ops_t string_output_ops = {
   .read         = NULL,
@@ -42,6 +45,7 @@ static const cl_stream_ops_t string_output_ops = {
   .direct       = NULL,
   .advance      = NULL,
   .write_string = sos_write_string,
+  .clear_output = sos_clear_output,
 };
 
 /* ── string input: create / read / close / listen ────────────────────── */
@@ -110,6 +114,11 @@ static void sis_advance(cl_stream_t *s, ptrdiff_t n) {
   if (!si || n <= 0) return;
   si->pos += (size_t)n;
   if (si->pos > si->len) si->pos = si->len;
+}
+
+static void sis_clear_input(cl_stream_t *s) {
+  string_input_impl_t *si = (string_input_impl_t *)s->impl;
+  if (si) si->pos = si->len;  /* skip all remaining data */
 }
 
 /* ── string output: block-chain (no realloc copying) ────────────────────*/
@@ -220,6 +229,20 @@ static ptrdiff_t sos_write_string(emacs_env *env, cl_stream_t *s, emacs_value st
   so->total_len += n;
 
   return (ptrdiff_t)n;
+}
+
+static void sos_clear_output(cl_stream_t *s) {
+  str_output_impl_t *so = (str_output_impl_t *)s->impl;
+  if (!so) return;
+  str_block_t *bk = so->head;
+  while (bk) {
+    str_block_t *next = bk->next;
+    free(bk);
+    bk = next;
+  }
+  so->head = NULL;
+  so->tail = NULL;
+  so->total_len = 0;
 }
 
 static int sos_close(cl_stream_t *s) {

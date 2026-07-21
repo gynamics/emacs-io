@@ -14,15 +14,19 @@ static int       fds_flush(cl_stream_t *s);
 static int       fds_finish(cl_stream_t *s);
 static bool      fds_listen(cl_stream_t *s);
 static void      fds_destroy(cl_stream_t *s);
+static void      fds_clear_input(cl_stream_t *s);
+static void      fds_clear_output(cl_stream_t *s);
 
 static const cl_stream_ops_t fd_stream_ops = {
-  .read    = fds_read,
-  .write   = fds_write,
-  .close   = fds_close,
-  .flush   = fds_flush,
-  .finish  = fds_finish,
-  .listen  = fds_listen,
-  .destroy = fds_destroy,
+  .read         = fds_read,
+  .write        = fds_write,
+  .close        = fds_close,
+  .flush        = fds_flush,
+  .finish       = fds_finish,
+  .listen       = fds_listen,
+  .destroy      = fds_destroy,
+  .clear_input  = fds_clear_input,
+  .clear_output = fds_clear_output,
 };
 
 /* ── create / destroy ────────────────────────────────────────────────── */
@@ -277,4 +281,14 @@ static void fds_destroy(cl_stream_t *s) {
     free(fi->wbuf);
     free(fi);
   }
+}
+
+static void fds_clear_input(cl_stream_t *s) {
+  fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
+  if (fi) { fi->rpos = 0; fi->rlen = 0; }
+}
+
+static void fds_clear_output(cl_stream_t *s) {
+  fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
+  if (fi) fi->wlen = 0;
 }

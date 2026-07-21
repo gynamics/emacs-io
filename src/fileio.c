@@ -140,41 +140,17 @@ emacs_value Fmake_string_input(emacs_env *env, ptrdiff_t nargs,
   if (end > slen) end = slen;
   if (end < start) end = start;
 
-  cl_stream_t *s = stream_create_string_input(str + start, (size_t)(end - start));
+  /* pass the full malloc'd buffer; set cursor via impl fields.
+     sis_destroy will free(str) — must be the base of the allocation. */
+  cl_stream_t *s = stream_create_string_input(str, (size_t)slen);
   if (!s) {
     free(str);
     signal_error(env, "Cannot create string input stream");
     return eintern(env, "nil");
   }
-
-  /* The string data is now owned by the stream's impl. We need to make
-     a copy since estring_alloc gives us a malloc'd buffer. Let's store it. */
-  /* stream_create_string_input just stores the pointer, so we must not free.
-     But we also need to track the buffer for freeing on close.
-     Actually, the string_input_impl just stores a const char* pointer.
-     We'll free it in our stream_free variant. */
-
-  /* Fix: make a copy in stream_create_string_input or track it.
-     For now, we allocate and pass — the str memory leaks. Better approach:
-     duplicate and register finalizer. Let's just use a simpler approach:
-     allocate with strdup and modify stream_create_string_input to take ownership
-     (cast to non-const to allow free). */
-
-  /* Quick fix: make strdup copy */
-  char *copy = malloc(strlen(str + start) + 1);
-  if (!copy) { free(str); signal_error(env, "Memory allocation failed"); return eintern(env, "nil"); }
-  strcpy(copy, str + start);
-  free(str);
-  if (!copy) {
-    stream_close(s);
-    signal_error(env, "Memory allocation failed");
-    return eintern(env, "nil");
-  }
-  /* Patch: update the impl's data pointer */
   string_input_impl_t *si = (string_input_impl_t *)s->impl;
-  si->data = copy;
-  si->len = (size_t)(end - start);
-  si->pos = 0;
+  si->pos = (size_t)start;
+  si->len = (size_t)end;
 
   return euser_ptr_stream_make(env, s);
 }
