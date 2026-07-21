@@ -183,7 +183,27 @@
       ;; comint buffer incremental insert+scan vs stream line-by-line.
       ;; Report-only; per-char read-line overhead makes stream comparable
       ;; rather than dominant.  Bulk sink the stream wins elsewhere.
-      nil)))
+       nil)))
+
+;; ═══════════════════════════════════════════════════════════════════════════
+;; scale / stress: correctness at volume
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(ert-deftest emacs-io-perf-large-string-output ()
+  "100K write-string: no data corruption."
+  (let* ((big (make-string 100000 ?X))
+         (result (emacs-io-perf--with-string-output
+                   (cl-write-string big stream))))
+    (should (equal (length result) 100000))
+    (should (string-match-p "\\`X+\\'" result))))
+
+(ert-deftest emacs-io-perf-large-line-output ()
+  "1K write-line: correct number of newlines."
+  (let* ((n 1000)
+         (result (emacs-io-perf--with-string-output
+                   (dotimes (i n)
+                     (cl-write-line (format "line %d" i) stream)))))
+    (should (equal (cl-count ?\n result) n))))
 
 (provide 'emacs-io-perf-test)
 ;;; emacs-io-perf-test.el ends here

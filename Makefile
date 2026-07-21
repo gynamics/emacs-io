@@ -11,7 +11,7 @@ OBJS     = $(SRC)/emacs-io.o $(SRC)/util.o $(SRC)/stream.o $(SRC)/fdstream.o \
            $(SRC)/strstream.o $(SRC)/stdstream.o $(SRC)/reader.o $(SRC)/printer.o \
            $(SRC)/fileio.o $(SRC)/lispio.o
 TEST     = $(TST)/emacs-io-test.el
-BENCH    = $(TST)/emacs-io-perf-test.el
+BENCH    = bench/emacs-io-perf-test.el
 
 .PHONY: all clean check verify test bench
 
@@ -30,6 +30,10 @@ check: $(TARGET)
 	@echo "Module:   $(TARGET)"
 	@file $(TARGET)
 	@echo "Exports:  $$(nm -D $(TARGET) | grep ' T ' | grep -E '^[0-9a-f]+ T (F|cl_|e)' | wc -l) symbols"
+	@echo ""
+	@echo "Targets:"
+	@echo "  make test     — 46 functional correctness tests (one per interface)"
+	@echo "  make bench    —  8 performance / scale tests"
 
 verify: $(TARGET)
 	@$(EMACS) --batch -Q --eval '(module-load "$(CURDIR)/$(TARGET)")' \
@@ -43,4 +47,4 @@ test: $(TARGET)
 bench: $(TARGET)
 	@rm -f $(BENCH:.el=.elc)
 	@echo "=== benchmarks ==="
-	@$(EMACS) --batch -Q -L $(SRC) -L $(TST) -l $(BENCH) -f ert-run-tests-batch-and-exit
+	@$(EMACS) --batch -Q -L $(SRC) -L bench -l $(BENCH) -f ert-run-tests-batch-and-exit

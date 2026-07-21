@@ -362,23 +362,5 @@
     (cl-close stream)
     (should-error (cl-read-char stream))))
 
-;; ── Performance: Large Output ────────────────────────────────────────────
-
-(ert-deftest emacs-io-test-large-string-output ()
-  "Test large string output (100K chars)."
-  (let ((big-string (make-string 100000 ?X)))
-    (let ((result (emacs-io-test--with-string-output
-                    (cl-write-string big-string stream))))
-      (should (equal (length result) 100000))
-      (should (string-match-p "\\`X+\\'" result)))))
-
-(ert-deftest emacs-io-test-large-line-output ()
-  "Test writing many lines via string output stream."
-  (let* ((n 1000)
-         (result (emacs-io-test--with-string-output
-                   (dotimes (i n)
-                     (cl-write-line (format "line %d" i) stream)))))
-    (should (equal (cl-count ?\n result) n))))
-
 (provide 'emacs-io-test)
 ;;; emacs-io-test.el ends here
