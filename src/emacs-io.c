@@ -274,7 +274,7 @@ int emacs_module_init(struct emacs_runtime *runtime) {
          "\n(fn SEQUENCE STREAM &key START END)", NULL);
 
   defun(env, "cl-write-strings", Fwrite_strings, 1, 3,
-        "Write a list of strings to STREAM in one module call.\n"
+        "Write a list or vector of strings to STREAM in one module call.\n"
         "\n"
         "STRINGS is a Lisp list of strings.  STREAM defaults to\n"
         "`*standard-output*'.  Returns STRINGS.\n"
