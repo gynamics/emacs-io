@@ -279,6 +279,46 @@
            nil)
        (ignore-errors (delete-file fs) (delete-file fb))))))
 
+;; ── Block-chain advantage: many medium writes (no realloc copies) ────────
+
+(ert-deftest emacs-io-perf-blockchain-write-10m ()
+  "1000 × 10KB writes via cl-write-string, block-chain vs buffer insert loop."
+  (emacs-io-perf--skip-unless-full
+   (let* ((chunk (make-string 10240 ?x))
+          (n 1000))
+     (emacs-io-perf--report "blockchain-write 10M"
+       (emacs-io-perf--time (lambda ()
+                              (emacs-io-perf--with-string-output
+                                (dotimes (_ n)
+                                  (cl-write-string chunk stream)))))
+       (emacs-io-perf--time (lambda ()
+                              (with-temp-buffer
+                                (dotimes (_ n) (insert chunk))
+                                (buffer-string))))
+       ;; 1000 malloc calls (one per 64KB block) vs 1000 insert calls.
+       ;; Block-chain wins vs realloc but loses to Emacs' C-level insert.
+       nil))))
+
+;; ── File write: stream fd vs Emacs native (isolated from round-trip) ─────
+
+(ert-deftest emacs-io-perf-fd-write-10m ()
+  "10 MB file write: stream fd vs write-region."
+  (emacs-io-perf--skip-unless-full
+   (let* ((data (make-string (* 10 1024 1024) ?x))
+          (fs (make-temp-file "emacs-io-perf-s-"))
+          (fb (make-temp-file "emacs-io-perf-b-")))
+     (unwind-protect
+         (emacs-io-perf--report "fd-write 10M"
+           (emacs-io-perf--time (lambda ()
+                                  (let ((s (cl-open fs :direction :output :if-exists :supersede)))
+                                    (cl-write-string data s)
+                                    (cl-close s))))
+           (emacs-io-perf--time (lambda ()
+                                  (with-temp-buffer (insert data)
+                                    (write-region (point-min) (point-max) fb nil 'silent))))
+           :assert)
+       (ignore-errors (delete-file fs) (delete-file fb))))))
+
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; file-type detection — verify fstat / isatty classification
 ;; ═══════════════════════════════════════════════════════════════════════════
