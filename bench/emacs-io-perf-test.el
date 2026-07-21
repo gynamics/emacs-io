@@ -57,8 +57,12 @@
                                 (cl-write-string data s)
                                 (cl-get-output-stream-string s))))
        (emacs-io-perf--time (lambda ()
-                               (with-temp-buffer (insert data) (buffer-string))))
-        nil))))
+                              (with-temp-buffer (insert data) (buffer-string))))
+       ;; 3 module API calls (make_string, copy_string_contents x2) vs
+       ;; 2 internal Lisp primitives (insert, buffer-string).  The
+       ;; copy_string_contents API requires query-then-copy; insert does
+       ;; both in one internal operation.
+       nil))))
 
 (ert-deftest emacs-io-perf-bulk-read-10m ()
   "10 MB single-call: cl-read-string(N) vs buffer-string."
@@ -345,7 +349,10 @@
                               (with-temp-buffer
                                 (dotimes (_ n) (insert chunk))
                                 (buffer-string))))
-        nil))))
+       ;; 1000 copy_string_contents calls (one per element) vs 1000
+       ;; insert calls.  copy_string_contents does query+copy (two API
+       ;; crossings per call); insert is one internal operation.
+       nil))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 
