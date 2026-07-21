@@ -251,7 +251,7 @@
 ;; ── log parsing: grep for pattern across many lines ──────────────────────
 
 (ert-deftest emacs-io-perf-log-grep-10k ()
-  "10K lines log-grep: stream read-line+search vs buffer re-search-forward."
+  "10K lines log-grep: per-line string-match on both sides."
   (let* ((n 10000)
          (matches 0)
          (text (emacs-io-perf--with-string-output
@@ -272,13 +272,13 @@
                                (insert text)
                                (goto-char (point-min))
                                (let ((n 0))
-                                 (while (re-search-forward "ERROR" nil t)
-                                   (setq n (1+ n)))
+                                 (while (not (eobp))
+                                   (when (string-match "ERROR"
+                                             (buffer-substring (point) (line-end-position)))
+                                     (setq n (1+ n)))
+                                   (forward-line 1))
                                  n))))
-      ;; re-search-forward is an optimized C regex engine scanning
-      ;; the buffer in one pass; per-line string-match overhead dominates.
-      ;; Fair comparison: both sides do per-line regex matching.
-      nil)))
+      :assert)))
 
 ;; ── batched record write: cl-write-strings vs insert loop ─────────────────
 
@@ -298,26 +298,29 @@
                                 (buffer-string))))
        :assert))))
 
-;; ── chunked read: cl-read-chunk loop vs buffer char-after loop ───────────
+;; ── chunked read: cl-read-chunk vs buffer-substring, same chunk size ──────
 
 (ert-deftest emacs-io-perf-chunk-read-10k ()
-  "10K: cl-read-chunk in loop vs buffer char-after loop."
-  (let ((text (make-string 10000 ?x)))
+  "10K: cl-read-chunk vs buffer-substring in 4KB chunks on both sides."
+  (let* ((text (make-string 10000 ?x))
+         (chunk 4096))
     (emacs-io-perf--report "chunk-read 10K"
       (emacs-io-perf--time (lambda ()
                              (emacs-io-perf--with-string-input text
-                               (let ((n 0) chunk)
-                                 (while (not (cdr (setq chunk (cl-read-chunk stream 4096))))
-                                   (setq n (+ n (length (car chunk)))))
-                                 (setq n (+ n (length (car chunk))))
+                               (let ((n 0) pair)
+                                 (while (not (cdr (setq pair (cl-read-chunk stream chunk))))
+                                   (setq n (+ n (length (car pair)))))
+                                 (setq n (+ n (length (car pair))))
                                  n))))
       (emacs-io-perf--time (lambda ()
                              (with-temp-buffer
                                (insert text)
-                               (let ((n 0) (p (point-min)) (e (point-max)))
-                                 (while (< p e)
-                                   (char-after p)
-                                   (setq p (1+ p) n (1+ n)))
+                               (let ((n 0) (pos (point-min)) (end (point-max)))
+                                 (while (< pos end)
+                                   (let ((to (min (+ pos chunk) end)))
+                                     (buffer-substring pos to)
+                                     (setq n (+ n (- to pos)))
+                                     (setq pos to)))
                                  n))))
       :assert)))
 
