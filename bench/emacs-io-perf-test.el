@@ -205,5 +205,79 @@
                      (cl-write-line (format "line %d" i) stream)))))
     (should (equal (cl-count ?\n result) n))))
 
+;; ═══════════════════════════════════════════════════════════════════════════
+;; 10 MB scale — bulk I/O throughput (fair: single-call on both sides)
+;; Set EMACS_IO_BENCH_FULL=1 to run these.
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(defvar emacs-io-perf--full
+  (equal (getenv "EMACS_IO_BENCH_FULL") "1")
+  "Non-nil when the 10 MB-level benchmarks should run.")
+
+(defmacro emacs-io-perf--skip-unless-full (&rest body)
+  (declare (indent 0))
+  `(when emacs-io-perf--full ,@body))
+
+;; ── 10 MB string output, bulk write ─────────────────────────────────────
+
+(ert-deftest emacs-io-perf-bulk-output-10m ()
+  "10 MB bulk string write, stream vs buffer (single call on both sides)."
+  (emacs-io-perf--skip-unless-full
+   (let ((data (make-string (* 10 1024 1024) ?x)))
+     (emacs-io-perf--report "bulk-write 10M"
+       (emacs-io-perf--time (lambda ()
+                              (emacs-io-perf--with-string-output
+                                (cl-write-string data stream))))
+       (emacs-io-perf--time (lambda ()
+                              (with-temp-buffer (insert data) (buffer-string))))
+       ;; Emacs `insert' is a single C primitive; stream_write
+       ;; goes through mutex + vtable dispatch.
+       nil))))
+
+;; ── 10 MB string input, bulk read into vector ───────────────────────────
+
+(ert-deftest emacs-io-perf-bulk-read-10m ()
+  "10 MB bulk read into vector, stream vs buffer (single call on both sides)."
+  (emacs-io-perf--skip-unless-full
+   (let ((data (make-string (* 10 1024 1024) ?x)))
+     (emacs-io-perf--report "bulk-read 10M"
+       (emacs-io-perf--time (lambda ()
+                              (emacs-io-perf--with-string-input data
+                                (let ((v (make-vector (length data) 0)))
+                                  (cl-read-sequence v stream) v))))
+       (emacs-io-perf--time (lambda ()
+                              (with-temp-buffer
+                                (insert data)
+                                (vconcat (buffer-string)))))
+       ;; vconcat of buffer-string is a single C call;
+       ;; cl-read-sequence fills a vector element-by-element.
+       nil))))
+
+;; ── 10 MB file write + read round-trip ──────────────────────────────────
+
+(ert-deftest emacs-io-perf-file-rw-10m ()
+  "10 MB file write+read round-trip, stream vs Emacs native."
+  (emacs-io-perf--skip-unless-full
+   (let* ((data (make-string (* 10 1024 1024) ?x))
+          (fs (make-temp-file "emacs-io-perf-s-"))
+          (fb (make-temp-file "emacs-io-perf-b-")))
+     (unwind-protect
+         (emacs-io-perf--report "file-rw 10M"
+           (emacs-io-perf--time (lambda ()
+                                  (let ((s (cl-open fs :direction :output :if-exists :supersede)))
+                                    (cl-write-string data s) (cl-close s))
+                                  (let* ((s (cl-open fs :direction :input))
+                                         (v (make-vector (length data) 0)))
+                                    (cl-read-sequence v s) (cl-close s) v)))
+           (emacs-io-perf--time (lambda ()
+                                  (with-temp-buffer (insert data)
+                                    (write-region (point-min) (point-max) fb nil 'silent))
+                                  (with-temp-buffer (insert-file-contents fb)
+                                    (vconcat (buffer-string)))))
+           ;; Emacs write-region+insert-file-contents use mmap/kernel
+           ;; page cache directly; stream goes through userspace buffers.
+           nil)
+       (ignore-errors (delete-file fs) (delete-file fb))))))
+
 (provide 'emacs-io-perf-test)
 ;;; emacs-io-perf-test.el ends here
