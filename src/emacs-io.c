@@ -67,7 +67,11 @@ extern emacs_value Foutput_stream_p(emacs_env *env, ptrdiff_t nargs,
 extern emacs_value Fstream_element_type(emacs_env *env, ptrdiff_t nargs,
                                          emacs_value *args, void *data);
 extern emacs_value Fmake_buffer_input_stream(emacs_env *env, ptrdiff_t nargs,
-                                              emacs_value *args, void *data);
+                                               emacs_value *args, void *data);
+extern emacs_value Ffile_regular_p(emacs_env *env, ptrdiff_t nargs,
+                                    emacs_value *args, void *data);
+extern emacs_value Ffile_tty_p(emacs_env *env, ptrdiff_t nargs,
+                                emacs_value *args, void *data);
 
 /* lispio.c */
 extern emacs_value Fread(emacs_env *env, ptrdiff_t nargs,
@@ -313,7 +317,15 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "Return a type specifier for the kind of object returned by\n"
         "`cl-read-char' on STREAM.\n"
         "\n"
-        "Currently returns `character' or the list `(unsigned-byte 8)'.\n"
+         "Currently returns `character' or the list `(unsigned-byte 8)'.\n"
+         "\n(fn STREAM)", NULL);
+
+  defun(env, "cl-file-regular-p", Ffile_regular_p, 1, 1,
+        "Return t if STREAM is backed by a regular file (S_ISREG).\n"
+        "\n(fn STREAM)", NULL);
+
+  defun(env, "cl-file-tty-p", Ffile_tty_p, 1, 1,
+        "Return t if STREAM is connected to a terminal (isatty).\n"
         "\n(fn STREAM)", NULL);
 
   /* ── Lisp reader / printer ───────────────────────────────────────── */

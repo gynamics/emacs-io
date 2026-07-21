@@ -1,7 +1,6 @@
 #include "stream.h"
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/uio.h>
@@ -61,6 +60,16 @@ cl_stream_t *stream_create_fd(int fd, bool owns_fd, unsigned flags) {
   s->impl = fi;
   s->kind = CL_STREAM_KIND_FD;
   s->flags = flags;
+
+  /* detect file type via standard Linux macros */
+  {
+    struct stat st;
+    if (fstat(fd, &st) == 0)
+      s->file_mode = st.st_mode;
+    if (isatty(fd))
+      s->flags |= CL_STREAM_FLAG_INTERACTIVE;
+  }
+
   atomic_init(&s->open, true);
   pthread_mutex_init(&s->mutex, NULL);
 

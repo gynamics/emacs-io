@@ -89,19 +89,14 @@ static bool sis_listen(cl_stream_t *s) {
   return si != NULL && si->pos < si->len;
 }
 
-/* ── string output: create / write / close ────────────────────────────── */
+/* ── string output: block-chain (no realloc copying) ────────────────────*/
 
 cl_stream_t *stream_create_string_output(void) {
-  string_output_impl_t *so = malloc(sizeof(*so));
+  str_output_impl_t *so = calloc(1, sizeof(*so));
   if (!so) return NULL;
-  so->cap = STRING_OUTPUT_INITIAL_CAP;
-  so->data = malloc(so->cap);
-  if (!so->data) { free(so); return NULL; }
-  so->len = 0;
-  so->data[0] = '\0';
 
   cl_stream_t *s = calloc(1, sizeof(*s));
-  if (!s) { free(so->data); free(so); return NULL; }
+  if (!s) { free(so); return NULL; }
 
   s->ops = &string_output_ops;
   s->impl = so;
@@ -115,21 +110,34 @@ cl_stream_t *stream_create_string_output(void) {
 
 static ptrdiff_t sos_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
   if (!s || !buf || n <= 0) return 0;
-  string_output_impl_t *so = (string_output_impl_t *)s->impl;
+  str_output_impl_t *so = (str_output_impl_t *)s->impl;
   if (!so) return -1;
 
-  size_t needed = so->len + (size_t)n + 1;
-  if (needed > so->cap) {
-    size_t new_cap = so->cap;
-    while (new_cap < needed) new_cap = (new_cap * 3) / 2;
-    char *new_data = realloc(so->data, new_cap);
-    if (!new_data) return -1;
-    so->data = new_data;
-    so->cap = new_cap;
+  /* If tail has room, write directly — zero old-data copying */
+  if (so->tail && so->tail->cap - so->tail->len >= (size_t)n) {
+    memcpy(so->tail->data + so->tail->len, buf, (size_t)n);
+    so->tail->len += (size_t)n;
+    so->total_len += (size_t)n;
+    return n;
   }
-  memcpy(so->data + so->len, buf, (size_t)n);
-  so->len += (size_t)n;
-  so->data[so->len] = '\0';
+
+  /* Allocate new block.  For large writes, match size exactly;
+     otherwise use default block size. */
+  size_t new_cap = STR_BLOCK_DEFAULT_CAP;
+  if ((size_t)n > new_cap) new_cap = (size_t)n;
+
+  str_block_t *bk = malloc(sizeof(*bk) + new_cap);
+  if (!bk) return -1;
+  bk->next = NULL;
+  bk->len = (size_t)n;
+  bk->cap = new_cap;
+  memcpy(bk->data, buf, (size_t)n);
+
+  if (!so->head) so->head = bk;
+  else so->tail->next = bk;
+  so->tail = bk;
+  so->total_len += (size_t)n;
+
   return n;
 }
 
@@ -140,11 +148,130 @@ static int sos_close(cl_stream_t *s) {
 }
 
 static void sos_destroy(cl_stream_t *s) {
-  string_output_impl_t *so = (string_output_impl_t *)s->impl;
-  if (so) {
-    free(so->data);
-    free(so);
+  str_output_impl_t *so = (str_output_impl_t *)s->impl;
+  if (!so) return;
+  str_block_t *bk = so->head;
+  while (bk) {
+    str_block_t *next = bk->next;
+    free(bk);
+    bk = next;
   }
+  free(so);
+}
+
+/* ── get accumulated string from block-chain output stream ───────────── */
+
+emacs_value str_output_to_string(emacs_env *env, cl_stream_t *s) {
+  str_output_impl_t *so = (str_output_impl_t *)s->impl;
+  if (!so) return eintern(env, "nil");
+
+  if (!so->head) return env->make_string(env, "", 0);
+
+  /* Single block — return directly */
+  if (so->head == so->tail)
+    return env->make_string(env, so->head->data, (ptrdiff_t)so->head->len);
+
+  /* Multiple blocks — use Emacs concat (uses Emacs' own allocator) */
+  int nblocks = 0;
+  for (str_block_t *bk = so->head; bk; bk = bk->next) nblocks++;
+
+  emacs_value *elts = malloc((size_t)nblocks * sizeof(emacs_value));
+  if (!elts) return eintern(env, "nil");
+  str_block_t *bk = so->head;
+  for (int i = 0; i < nblocks; i++, bk = bk->next) {
+    if (!bk) break;
+    elts[i] = env->make_string(env, bk->data, (ptrdiff_t)bk->len);
+  }
+
+  emacs_value concat_sym = eintern(env, "concat");
+  emacs_value result = env->funcall(env, concat_sym, nblocks, elts);
+  free(elts);
+  return result;
+}
+
+/* ── mmap-backed input stream (regular files only) ────────────────────── */
+
+static ptrdiff_t mmap_read(cl_stream_t *s, void *buf, ptrdiff_t n);
+static int       mmap_close(cl_stream_t *s);
+static bool      mmap_listen(cl_stream_t *s);
+static void      mmap_destroy(cl_stream_t *s);
+
+static const cl_stream_ops_t mmap_stream_ops = {
+  .read    = mmap_read,
+  .write   = NULL,
+  .close   = mmap_close,
+  .flush   = NULL,
+  .finish  = NULL,
+  .listen  = mmap_listen,
+  .destroy = mmap_destroy,
+};
+
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+cl_stream_t *stream_create_mmap(int fd, bool owns_fd) {
+  struct stat st;
+  if (fstat(fd, &st) < 0 || st.st_size <= 0) return NULL;
+
+  void *addr = mmap(NULL, (size_t)st.st_size, PROT_READ,
+                    MAP_PRIVATE, fd, 0);
+  if (addr == MAP_FAILED) return NULL;
+
+  mmap_stream_impl_t *mi = calloc(1, sizeof(*mi));
+  if (!mi) { munmap(addr, (size_t)st.st_size); return NULL; }
+
+  mi->addr = addr;
+  mi->size = (size_t)st.st_size;
+  mi->pos  = 0;
+  mi->fd   = fd;
+  mi->owns_fd = owns_fd;
+
+  cl_stream_t *s = calloc(1, sizeof(*s));
+  if (!s) { munmap(addr, (size_t)st.st_size); free(mi); return NULL; }
+
+  s->ops = &mmap_stream_ops;
+  s->impl = mi;
+  s->kind = CL_STREAM_KIND_MMAP;
+  s->flags = CL_STREAM_FLAG_INPUT;
+  s->file_mode = st.st_mode;  /* already have from fstat above */
+  atomic_init(&s->open, true);
+  pthread_mutex_init(&s->mutex, NULL);
+
+  return s;
+}
+
+static ptrdiff_t mmap_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
+  if (!s || !buf || n <= 0) return 0;
+  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
+  if (!mi || mi->pos >= mi->size) return 0;
+
+  size_t remaining = mi->size - mi->pos;
+  size_t to_copy = (size_t)n < remaining ? (size_t)n : remaining;
+  memcpy(buf, (const char *)mi->addr + mi->pos, to_copy);
+  mi->pos += to_copy;
+  return (ptrdiff_t)to_copy;
+}
+
+static int mmap_close(cl_stream_t *s) {
+  if (!atomic_load(&s->open)) return 0;
+  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
+  if (mi) {
+    munmap(mi->addr, mi->size);
+    if (mi->owns_fd && mi->fd >= 0) close(mi->fd);
+  }
+  atomic_store(&s->open, false);
+  return 0;
+}
+
+static void mmap_destroy(cl_stream_t *s) {
+  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
+  if (mi) free(mi);
+}
+
+static bool mmap_listen(cl_stream_t *s) {
+  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
+  return mi != NULL && mi->pos < mi->size;
 }
 
 /* ── buffer input stream ─────────────────────────────────────────────── */

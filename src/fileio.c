@@ -71,7 +71,16 @@ emacs_value Fopen(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     return eintern(env, "nil");
   }
 
-  cl_stream_t *s = stream_create_fd(fd, true, flags);
+  /* use mmap for regular files opened read-only (zero-copy reads) */
+  cl_stream_t *s = NULL;
+  if (oflags == O_RDONLY) {
+    struct stat st;
+    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode))
+      s = stream_create_mmap(fd, true);
+  }
+  if (!s)
+    s = stream_create_fd(fd, true, flags);
+
   if (!s) {
     close(fd);
     signal_error(env, "Cannot create stream");
@@ -196,16 +205,11 @@ emacs_value Fget_output_stream_string(emacs_env *env, ptrdiff_t nargs,
     return eintern(env, "nil");
   }
   cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
-  if (!s) {
-    signal_error(env, "Invalid stream");
-    return eintern(env, "nil");
-  }
-  string_output_impl_t *so = (string_output_impl_t *)s->impl;
-  if (!so) {
+  if (!s || s->kind != CL_STREAM_KIND_STRING_OUTPUT) {
     signal_error(env, "Not a string output stream");
     return eintern(env, "nil");
   }
-  return env->make_string(env, so->data, (ptrdiff_t)so->len);
+  return str_output_to_string(env, s);
 }
 
 /* ── stream predicates ────────────────────────────────────────────────── */
@@ -246,6 +250,22 @@ emacs_value Fstream_element_type(emacs_env *env, ptrdiff_t nargs,
   if (s->flags & CL_STREAM_FLAG_BINARY)
     return estring(env, "(unsigned-byte 8)");
   return eintern(env, "character");
+}
+
+/* ── file type predicates ──────────────────────────────────────────── */
+
+emacs_value Ffile_regular_p(emacs_env *env, ptrdiff_t nargs,
+                             emacs_value *args, void *data) {
+  (void)data; (void)nargs;
+  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
+  return stream_is_regular(s) ? eintern(env, "t") : eintern(env, "nil");
+}
+
+emacs_value Ffile_tty_p(emacs_env *env, ptrdiff_t nargs,
+                         emacs_value *args, void *data) {
+  (void)data; (void)nargs;
+  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
+  return stream_is_tty(s) ? eintern(env, "t") : eintern(env, "nil");
 }
 
 /* ── cl-make-buffer-input-stream ────────────────────────────────────────
