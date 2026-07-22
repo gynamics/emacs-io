@@ -36,6 +36,7 @@ typedef ptrdiff_t (*stream_write_string_fn)(emacs_env *env, cl_stream_t *s, emac
 typedef void      (*stream_clear_fn)(cl_stream_t *s);
 typedef ptrdiff_t (*stream_file_position_fn)(cl_stream_t *s);
 typedef bool      (*stream_set_file_position_fn)(cl_stream_t *s, ptrdiff_t pos);
+typedef ptrdiff_t (*stream_file_length_fn)(cl_stream_t *s);
 
 struct cl_stream_ops {
   stream_read_fn         read;
@@ -52,6 +53,7 @@ struct cl_stream_ops {
   stream_clear_fn        clear_output;
   stream_file_position_fn file_position;
   stream_set_file_position_fn set_file_position;
+  stream_file_length_fn   file_length;
 };
 
 /* ── core stream object ──────────────────────────────────────────────── */
@@ -76,6 +78,10 @@ struct cl_stream {
   int                    pushback_chars[256];
   int                    pushback_head;
   int                    pushback_tail;
+
+  /* output column tracking for cl-fresh-line */
+  ptrdiff_t              column;       /* current column, 0 = BOL */
+  int                    last_char;    /* last byte written */
 };
 
 /* ── concrete impl structs ───────────────────────────────────────────── */
@@ -150,6 +156,7 @@ bool      stream_direct(cl_stream_t *s, const void **addr, size_t *len);
 void      stream_advance(cl_stream_t *s, ptrdiff_t n);
 ptrdiff_t stream_file_position(cl_stream_t *s);
 bool      stream_set_file_position(cl_stream_t *s, ptrdiff_t pos);
+ptrdiff_t stream_file_length(cl_stream_t *s);
 
 emacs_value str_output_to_string(emacs_env *env, cl_stream_t *s);
 

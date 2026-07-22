@@ -113,6 +113,18 @@
     (should (equal (cl-read-char stream) ?a))
     (should (equal (cl-read-char stream) ?b))))
 
+(ert-deftest emacs-io-test-peek-char-skip-whitespace ()
+  "Test cl-peek-char with peek-type t skips whitespace."
+  (emacs-io-test--with-string-input "  \n\tx"
+    (should (equal (cl-peek-char t stream) ?x))
+    (should (equal (cl-read-char stream) ?x))))
+
+(ert-deftest emacs-io-test-peek-char-skip-to-char ()
+  "Test cl-peek-char with character peek-type."
+  (emacs-io-test--with-string-input "aaaab"
+    (should (equal (cl-peek-char ?a stream) ?b))
+    (should (equal (cl-read-char stream) ?b))))
+
 (ert-deftest emacs-io-test-string-input-listen ()
   "Test cl-listen."
   (emacs-io-test--with-string-input "xy"
@@ -171,6 +183,12 @@
   "Test fresh-line."
   :tags '(:ert-quirk)
   (cl-fresh-line))  ;; without stream arg — exercises the C code safely
+
+(ert-deftest emacs-io-test-print-trailing-space ()
+  "Test cl-print includes trailing space."
+  (let ((result (emacs-io-test--with-string-output
+                  (cl-print "hello" stream))))
+    (should (equal result "\n\"hello\" "))))
 
 (ert-deftest emacs-io-test-string-output-empty ()
   "Test getting output from empty string output stream."
@@ -317,10 +335,11 @@
     (should (equal (cl-read stream) "hello world"))))
 
 (ert-deftest emacs-io-test-lisp-read-from-string ()
-  "Test cl-read-from-string."
-  (should (equal (cl-read-from-string "123") 123))
-  (should (equal (cl-read-from-string "nil") nil))
-  (should (equal (cl-read-from-string "t") t)))
+  "Test cl-read-from-string returns (value . position) cons."
+  (should (equal (car (cl-read-from-string "123")) 123))
+  (should (equal (cdr (cl-read-from-string "123")) 3))
+  (should (equal (car (cl-read-from-string "nil")) nil))
+  (should (equal (car (cl-read-from-string "t")) t)))
 
 (ert-deftest emacs-io-test-lisp-read-eof ()
   "Test read with EOF handling."
@@ -768,6 +787,28 @@
     (with-temp-buffer
       (insert-file-contents f)
       (should (equal (buffer-string) "abcXYZ")))))
+
+(ert-deftest emacs-io-test-file-length-file ()
+  "Test cl-file-length on a file stream."
+  (emacs-io-test--with-temp-file f
+    (with-temp-file f (insert "abcdefgh"))
+    (let ((s (cl-open f :direction :input)))
+      (should (equal (cl-file-length s) 8))
+      (cl-close s))))
+
+(ert-deftest emacs-io-test-file-length-string-input ()
+  "Test cl-file-length on a string input stream."
+  (emacs-io-test--with-string-input "abcdef"
+    (should (equal (cl-file-length stream) 6))))
+
+(ert-deftest emacs-io-test-file-length-string-output ()
+  "Test cl-file-length on a string output stream."
+  (let ((s (cl-make-string-output-stream)))
+    (cl-write-string "hello" s)
+    (should (equal (cl-file-length s) 5))
+    (cl-write-string "world" s)
+    (should (equal (cl-file-length s) 10))
+    (cl-close s)))
 
 (provide 'emacs-io-test)
 ;;; emacs-io-test.el ends here

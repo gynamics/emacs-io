@@ -13,6 +13,7 @@ static void      sis_advance(cl_stream_t *s, ptrdiff_t n);
 static void      sis_clear_input(cl_stream_t *s);
 static ptrdiff_t sis_file_position(cl_stream_t *s);
 static bool      sis_set_file_position(cl_stream_t *s, ptrdiff_t pos);
+static ptrdiff_t sis_file_length(cl_stream_t *s);
 
 static const cl_stream_ops_t string_input_ops = {
   .read        = sis_read,
@@ -27,6 +28,7 @@ static const cl_stream_ops_t string_input_ops = {
   .clear_input = sis_clear_input,
   .file_position = sis_file_position,
   .set_file_position = sis_set_file_position,
+  .file_length    = sis_file_length,
 };
 
 /* ── string-output ops ───────────────────────────────────────────────── */
@@ -36,6 +38,7 @@ static void      sos_destroy(cl_stream_t *s);
 static ptrdiff_t sos_write_string(emacs_env *env, cl_stream_t *s, emacs_value str);
 static void      sos_clear_output(cl_stream_t *s);
 static ptrdiff_t sos_file_position(cl_stream_t *s);
+static ptrdiff_t sos_file_length(cl_stream_t *s);
 
 static const cl_stream_ops_t string_output_ops = {
   .read         = NULL,
@@ -50,6 +53,7 @@ static const cl_stream_ops_t string_output_ops = {
   .write_string = sos_write_string,
   .clear_output = sos_clear_output,
   .file_position = sos_file_position,
+  .file_length    = sos_file_length,
 };
 
 /* ── string input: create / read / close / listen ────────────────────── */
@@ -130,6 +134,12 @@ static bool sis_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
   if (!si || pos < 0 || (size_t)pos > si->len) return false;
   si->pos = (size_t)pos;
   return true;
+}
+
+static ptrdiff_t sis_file_length(cl_stream_t *s) {
+  string_input_impl_t *si = (string_input_impl_t *)s->impl;
+  if (!si) return -1;
+  return (ptrdiff_t)si->len;
 }
 
 /* ── string output: block-chain (no realloc copying) ────────────────────*/
@@ -269,6 +279,12 @@ static void sos_destroy(cl_stream_t *s) {
 }
 
 static ptrdiff_t sos_file_position(cl_stream_t *s) {
+  str_output_impl_t *so = (str_output_impl_t *)s->impl;
+  if (!so) return -1;
+  return (ptrdiff_t)so->total_len;
+}
+
+static ptrdiff_t sos_file_length(cl_stream_t *s) {
   str_output_impl_t *so = (str_output_impl_t *)s->impl;
   if (!so) return -1;
   return (ptrdiff_t)so->total_len;

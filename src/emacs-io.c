@@ -13,7 +13,9 @@ extern emacs_value Fread_char(emacs_env *env, ptrdiff_t nargs,
 extern emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs,
                                emacs_value *args, void *data);
 extern emacs_value Fread_byte(emacs_env *env, ptrdiff_t nargs,
-                               emacs_value *args, void *data);
+                                emacs_value *args, void *data);
+extern emacs_value Fread_char_no_hang(emacs_env *env, ptrdiff_t nargs,
+                                       emacs_value *args, void *data);
 extern emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs,
                                emacs_value *args, void *data);
 extern emacs_value Funread_char(emacs_env *env, ptrdiff_t nargs,
@@ -79,6 +81,9 @@ extern emacs_value Ffile_tty_p(emacs_env *env, ptrdiff_t nargs,
 extern emacs_value Ffile_position(emacs_env *env, ptrdiff_t nargs,
                                   emacs_value *args, void *data);
 
+  extern emacs_value Ffile_length(emacs_env *env, ptrdiff_t nargs,
+                                  emacs_value *args, void *data);
+
 /* lispio.c */
 extern emacs_value Fread(emacs_env *env, ptrdiff_t nargs,
                           emacs_value *args, void *data);
@@ -113,36 +118,50 @@ int emacs_module_init(struct emacs_runtime *runtime) {
   cl_rt = runtime;
 
   /* ── reader ──────────────────────────────────────────────────────── */
-  defun(env, "cl-read-char", Fread_char, 0, 3,
+  defun(env, "cl-read-char", Fread_char, 0, 4,
         "Read one character from STREAM and return it.\n"
         "\n"
         "STREAM defaults to `*standard-input*'.\n"
         "If EOF-ERROR-P is nil and end of file is reached, return EOF-VALUE\n"
         "(which defaults to nil).\n"
         "If EOF-ERROR-P is non-nil (the default), signal an error on EOF.\n"
-        "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE)", NULL);
+        "RECURSIVE-P is accepted for compatibility and currently ignored.\n"
+        "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE RECURSIVE-P)", NULL);
 
-  defun(env, "cl-read-line", Fread_line, 0, 3,
-        "Read a line of text from STREAM and return it as a string.\n"
+  defun(env, "cl-read-line", Fread_line, 0, 4,
+        "Read a line of text from STREAM and return it as a list.\n"
         "\n"
         "Returns a list (LINE . MISSING-NEWLINE-P) where MISSING-NEWLINE-P\n"
         "is non-nil if the line was terminated by end-of-file rather than\n"
         "a newline.  The returned line does not include the newline.\n"
         "STREAM defaults to `*standard-input*'.\n"
-        "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE)", NULL);
+        "RECURSIVE-P is accepted for compatibility and currently ignored.\n"
+        "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE RECURSIVE-P)", NULL);
 
-  defun(env, "cl-read-byte", Fread_byte, 1, 3,
+  defun(env, "cl-read-byte", Fread_byte, 1, 4,
         "Read one byte from STREAM and return it as an integer.\n"
         "\n"
         "If EOF-ERROR-P is nil and end of file is reached, return EOF-VALUE.\n"
         "If EOF-ERROR-P is non-nil (the default), signal an error on EOF.\n"
-        "\n(fn STREAM &optional EOF-ERROR-P EOF-VALUE)", NULL);
+        "RECURSIVE-P is accepted for compatibility and currently ignored.\n"
+        "\n(fn STREAM &optional EOF-ERROR-P EOF-VALUE RECURSIVE-P)", NULL);
+
+  defun(env, "cl-read-char-no-hang", Fread_char_no_hang, 0, 3,
+        "Read a character from STREAM, or return nil if none is available.\n"
+        "\n"
+        "Unlike `cl-read-char', this function never blocks.\n"
+        "If no character is immediately available, it returns nil.\n"
+        "STREAM defaults to `*standard-input*'.\n"
+        "EOF-ERROR-P and EOF-VALUE are accepted for compatibility.\n"
+        "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE)", NULL);
 
   defun(env, "cl-peek-char", Fpeek_char, 0, 4,
         "Return the next character from STREAM without removing it.\n"
         "\n"
-        "PEEK-TYPE, if supplied and non-nil, causes peek to skip\n"
-        "whitespace characters (not fully implemented).\n"
+        "PEEK-TYPE controls which character is returned:\n"
+        "  nil  — return the next character (the default)\n"
+        "  t    — skip whitespace, then return the next character\n"
+        "  char — skip characters equal to char, then return the next\n"
         "STREAM defaults to `*standard-input*'.\n"
         "\n(fn &optional PEEK-TYPE STREAM EOF-ERROR-P EOF-VALUE)", NULL);
 
@@ -151,7 +170,7 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "\n"
         "CHARACTER must be the most recent character read from STREAM.\n"
         "STREAM defaults to `*standard-input*'.\n"
-        "The pushback buffer holds up to 16 characters.\n"
+        "The pushback buffer holds up to 256 characters.\n"
         "\n(fn CHARACTER &optional STREAM)", NULL);
 
   defun(env, "cl-listen", Flisten, 0, 1,
@@ -285,6 +304,7 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "  :ELEMENT-TYPE — character or (unsigned-byte 8)\n"
         "  :IF-EXISTS   — :ERROR, :SUPERSEDE, :APPEND, :OVERWRITE, NIL\n"
         "  :IF-DOES-NOT-EXIST — :ERROR, :CREATE, or NIL\n"
+        "  :EXTERNAL-FORMAT — accepted for compatibility, currently ignored\n"
         "PROBE returns a closed stream if the file exists, NIL otherwise.\n"
         "\n(fn FILENAME &key DIRECTION ELEMENT-TYPE IF-EXISTS IF-DOES-NOT-EXIST EXTERNAL-FORMAT)", NULL);
 
@@ -367,6 +387,13 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "value and return t on success, nil on failure.\n"
         "\n(fn STREAM &optional POSITION)", NULL);
 
+  defun(env, "cl-file-length", Ffile_length, 1, 1,
+        "Return the length of the file associated with STREAM.\n"
+        "\n"
+        "Returns a non-negative integer if the stream supports length\n"
+        "queries, or nil if the length cannot be determined.\n"
+        "\n(fn STREAM)", NULL);
+
   /* ── Lisp reader / printer ───────────────────────────────────────── */
   defun(env, "cl-read", Fread, 0, 4,
         "Read one Lisp object from STREAM and return it.\n"
@@ -380,7 +407,7 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE RECURSIVE-P)", NULL);
 
   defun(env, "cl-read-from-string", Fread_from_string, 1, 7,
-        "Read one Lisp object from STRING and return it.\n"
+        "Read one Lisp object from STRING and return (VALUE . POSITION).\n"
         "\n"
         "Delegates to Emacs' `read-from-string'.\n"
         "Keywords :START and :END delimit the substring to read.\n"
@@ -391,11 +418,14 @@ int emacs_module_init(struct emacs_runtime *runtime) {
   defun(env, "cl-write", Fwrite, 1, 15,
         "Write OBJECT to STREAM.\n"
         "\n"
-        "Accepts standard CL print-control keyword arguments (:ESCAPE,\n"
-        ":RADIX, :BASE, :CIRCLE, :PRETTY, :LEVEL, :LENGTH, :CASE,\n"
-        ":GENSYM, :ARRAY, :READABLY, :RIGHT-MARGIN, :MISER-WIDTH,\n"
-        ":PPRINT-DISPATCH, :LINES) for compatibility, though most are\n"
-        "currently ignored.\n"
+        "Accepts standard CL print-control keyword arguments that bind\n"
+        "the corresponding Emacs print-* variables during output:\n"
+        "  :ESCAPE → print-escape\n"
+        "  :RADIX → print-radix    :BASE → print-base\n"
+        "  :CIRCLE → print-circle  :PRETTY → print-pretty\n"
+        "  :LEVEL → print-level    :LENGTH → print-length\n"
+        "  :CASE → print-case      :GENSYM → print-gensym\n"
+        "  :ARRAY → print-array    :READABLY → print-readably\n"
         "\n(fn OBJECT &key STREAM ESCAPE RADIX BASE CIRCLE PRETTY LEVEL LENGTH CASE GENSYM ARRAY READABLY RIGHT-MARGIN MISER-WIDTH PPRINT-DISPATCH LINES)", NULL);
 
   defun(env, "cl-prin1", Fprin1, 1, 2,
@@ -416,9 +446,8 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "\n(fn OBJECT &optional STREAM)", NULL);
 
   defun(env, "cl-print", Fprint, 1, 2,
-        "Output a newline, then OBJECT, then a space, to STREAM.\n"
+        "Output a newline, then OBJECT (via PRIN1), then a space, to STREAM.\n"
         "\n"
-        "Delegates to `cl-prin1' for the actual printing.\n"
         "STREAM defaults to `*standard-output*'.\n"
         "Returns OBJECT.\n"
         "\n(fn OBJECT &optional STREAM)", NULL);

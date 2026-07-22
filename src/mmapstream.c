@@ -15,6 +15,7 @@ static bool      mmap_direct(cl_stream_t *s, const void **addr, size_t *len);
 static void      mmap_advance(cl_stream_t *s, ptrdiff_t n);
 static ptrdiff_t mmap_file_position(cl_stream_t *s);
 static bool      mmap_set_file_position(cl_stream_t *s, ptrdiff_t pos);
+static ptrdiff_t mmap_file_length(cl_stream_t *s);
 
 static const cl_stream_ops_t mmap_stream_ops = {
   .read     = mmap_read,
@@ -28,6 +29,7 @@ static const cl_stream_ops_t mmap_stream_ops = {
   .advance  = mmap_advance,
   .file_position = mmap_file_position,
   .set_file_position = mmap_set_file_position,
+  .file_length    = mmap_file_length,
 };
 
 cl_stream_t *stream_create_mmap(int fd, bool owns_fd) {
@@ -119,5 +121,11 @@ static bool mmap_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
   if (!mi || pos < 0 || (size_t)pos > mi->size) return false;
   mi->pos = (size_t)pos;
   return true;
+}
+
+static ptrdiff_t mmap_file_length(cl_stream_t *s) {
+  mmap_stream_impl_t *mi = (mmap_stream_impl_t *)s->impl;
+  if (!mi) return -1;
+  return (ptrdiff_t)mi->size;
 }
 

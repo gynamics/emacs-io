@@ -4,13 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ── try-read-from-buffer ──────────────────────────────────────────────
-   Attempt to call read-from-string on sb->data.
-   On success: store the parsed value in *result, set *consumed to the
-   number of bytes consumed, and return true.
-   On end-of-file (incomplete form): return false.
-   On any other error: clear the exit, return false (caller should retry
-   or propagate). */
+/* ── try-read-from-buffer ────────────────────────────────────────────── */
 
 static bool try_read_from_buffer(emacs_env *env, strbuf_t *sb,
                                   emacs_value *result, ptrdiff_t *consumed) {
@@ -19,12 +13,11 @@ static bool try_read_from_buffer(emacs_env *env, strbuf_t *sb,
   read_args[0] = estr;
   read_args[1] = eint(env, 0);
 
-  emacs_value raw = env->funcall(env, eintern(env, "read-from-string"),
+  emacs_value raw = env->funcall(env, syms.fn_read_from_string,
                                   2, read_args);
 
   enum emacs_funcall_exit exit = env->non_local_exit_check(env);
   if (exit == emacs_funcall_exit_return) {
-    /* Success: raw = (VALUE . POSITION).  Extract car and consumed count. */
     emacs_value pair = raw;
     *result = efuncall_cached(env, syms.fn_car, 1, &pair);
     emacs_value pos  = efuncall_cached(env, syms.fn_cdr, 1, &pair);
@@ -32,32 +25,25 @@ static bool try_read_from_buffer(emacs_env *env, strbuf_t *sb,
     return true;
   }
 
-  /* read-from-string signalled an error.  Detect end-of-file (incomplete form). */
   emacs_value sym = syms.v_nil;
   emacs_value data = syms.v_nil;
   env->non_local_exit_get(env, &sym, &data);
-  bool is_eof = env->eq(env, sym, eintern(env, "end-of-file"));
+  bool is_eof = env->eq(env, sym, syms.v_end_of_file);
   env->non_local_exit_clear(env);
 
   if (is_eof)
-    return false;  /* incomplete — need more data */
+    return false;
 
-  /* Some other read error (invalid syntax, etc.) — re-signal it. */
   env->non_local_exit_signal(env, sym, data);
   *consumed = 0;
   return false;
 }
 
-/* ── cl-read ────────────────────────────────────────────────────────────
-   Reads characters from STREAM, feeding them incrementally to Emacs'
-   read-from-string.  Emacs handles all form parsing; we are just a
-   transport layer.  Unconsumed bytes after a successful parse are
-   pushed back into the stream's ring buffer. */
+/* ── cl-read ──────────────────────────────────────────────────────────── */
 
 emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                   void *data) {
   (void)data;
-  /* (cl-read &optional stream eof-error-p eof-value recursive-p) */
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
   if (!s || !stream_is_open(s)) {
     signal_error(env, "cl-read: stream is closed");
@@ -73,23 +59,19 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   unsigned char chunk[4096];
 
   while (!parsed) {
-    /* try with what we have */
     if (sb->len > 0) {
       if (try_read_from_buffer(env, sb, &result, &consumed)) {
         parsed = true;
         break;
       }
-      /* if a non-eof error was re-signalled, bail out */
       if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
         strbuf_free(sb);
         return syms.v_nil;
       }
     }
 
-    /* read more data from stream */
     ptrdiff_t r = stream_read(s, chunk, sizeof(chunk));
     if (r <= 0) {
-      /* EOF — strip trailing whitespace and try one last time */
       if (sb->len > 0) {
         while (sb->len > 0 &&
                (sb->data[sb->len - 1] == ' '  ||
@@ -109,7 +91,6 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
           }
         }
       }
-      /* nothing parsed — signal EOF or return eof-value */
       strbuf_free(sb);
       if (nargs >= 2 && !env->is_not_nil(env, args[1]))
         return (nargs >= 3) ? args[2] : syms.v_nil;
@@ -117,16 +98,10 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       return syms.v_nil;
     }
 
-    if (!strbuf_append(sb, (const char *)chunk, r)) {
-      strbuf_free(sb);
-      signal_error(env, "Memory allocation failed");
-      return syms.v_nil;
-    }
+    strbuf_append(sb, (const char *)chunk, r);
   }
 
-  /* parsed successfully — push back unconsumed bytes */
   if (consumed < (ptrdiff_t)sb->len) {
-    /* push in forward order; unread enqueues at tail, read dequeues from head (FIFO) */
     for (ptrdiff_t i = consumed; i < (ptrdiff_t)sb->len; i++)
       stream_unread(s, (unsigned char)sb->data[i]);
   }
@@ -140,32 +115,74 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
                               emacs_value *args, void *data) {
   (void)data;
-  /* (cl-read-from-string string &optional eof-error-p eof-value
-                           &key start end preserve-whitespace)
-     Just delegate to Emacs read-from-string. */
   if (nargs < 1) {
     signal_error(env, "cl-read-from-string requires 1 argument");
     return syms.v_nil;
   }
 
-  emacs_value read_args[2];
-  read_args[0] = args[0];
-  read_args[1] = eint(env, 0);
+  ptrdiff_t start = 0;
+  ptrdiff_t end = -1;
+  bool eoferr = (nargs < 2) || env->is_not_nil(env, args[1]);
+  emacs_value eofval = (nargs >= 3) ? args[2] : syms.v_nil;
 
-  /* parse &key start */
-  for (ptrdiff_t i = 2; i < nargs - 1; i += 2) {
+  for (ptrdiff_t i = 3; i < nargs - 1; i += 2) {
     if (kw_eq_cached(env, args[i], syms.k_start))
-      read_args[1] = args[i + 1];
+      start = eint_extract(env, args[i + 1]);
+    else if (kw_eq_cached(env, args[i], syms.k_end))
+      end = eint_extract(env, args[i + 1]);
   }
 
-  emacs_value result = efuncall_cached(env, syms.fn_read_from_string, 2, read_args);
-  return efuncall_cached(env, syms.fn_car, 1, &result);
+  ptrdiff_t slen = 0;
+  char *str = estring_alloc(env, args[0], &slen);
+  if (!str) return syms.v_nil;
+
+  if (end < 0 || end > slen) end = slen;
+  if (start < 0) start = 0;
+  if (start > slen) { free(str); return eofval; }
+
+  emacs_value sstr = env->make_string(env, str + start, end - start);
+  free(str);
+
+  emacs_value raw = efuncall_cached(env, syms.fn_read_from_string, 1, &sstr);
+  if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
+    env->non_local_exit_clear(env);
+    if (!eoferr) return eofval;
+    signal_error(env, "End of file on string");
+    return syms.v_nil;
+  }
+
+  emacs_value car_val = efuncall_cached(env, syms.fn_car, 1, &raw);
+  ptrdiff_t pos = eint_extract(env, efuncall_cached(env, syms.fn_cdr, 1, &raw));
+  if (pos == 0 && end > start) {
+    /* nothing was read */
+    if (!eoferr) return eofval;
+    signal_error(env, "End of file on string");
+    return syms.v_nil;
+  }
+
+  /* return (value . pos+start) to reproduce the position in the original string */
+  emacs_value cons_args[2];
+  cons_args[0] = car_val;
+  cons_args[1] = eint(env, start + pos);
+  return efuncall_cached(env, syms.fn_cons, 2, cons_args);
 }
 
-/* ── cl-write ───────────────────────────────────────────────────────────
-   (cl-write object &key STREAM ESCAPE RADIX BASE CIRCLE PRETTY LEVEL
-            LENGTH CASE GENSYM ARRAY READABLY RIGHT-MARGIN MISER-WIDTH
-            PP-DISPATCH LINES) */
+/* ── cl-write ─────────────────────────────────────────────────────────── */
+
+static emacs_value write_bind_var(emacs_env *env, emacs_value privar,
+                                   emacs_value val) {
+  emacs_value sv_fn = syms.fn_symbol_value;
+  emacs_value o = efuncall_cached(env, sv_fn, 1, &privar);
+  emacs_value a[2] = {privar, val};
+  efuncall_cached(env, syms.fn_set, 2, a);
+  return o;
+}
+
+static void write_restore_var(emacs_env *env, emacs_value privar,
+                               emacs_value old) {
+  emacs_value a[2] = {privar, old};
+  efuncall_cached(env, syms.fn_set, 2, a);
+}
 
 emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                     void *data) {
@@ -177,20 +194,99 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   emacs_value obj = args[0];
   cl_stream_t *s = NULL;
+  emacs_value esc = syms.v_nil, pretty = syms.v_nil, circle = syms.v_nil;
+  emacs_value level = syms.v_nil, length = syms.v_nil, base = syms.v_nil;
+  emacs_value radix = syms.v_nil, kase = syms.v_nil, gensym = syms.v_nil;
+  emacs_value readably = syms.v_nil, array = syms.v_nil;
+  bool h_esc = false, h_pretty = false, h_circle = false;
+  bool h_level = false, h_length = false, h_base = false;
+  bool h_radix = false, h_case = false, h_gensym = false;
+  bool h_readably = false, h_array = false;
 
-  /* find :stream key */
   for (ptrdiff_t i = 1; i < nargs - 1; i += 2) {
-    if (kw_eq_cached(env, args[i], syms.k_stream)) {
-      s = euser_ptr_stream_get(env, args[i + 1]);
-      break;
-    }
+    if (kw_eq_cached(env, args[i], syms.k_stream))
+      { s = euser_ptr_stream_get(env, args[i + 1]); }
+    else if (kw_eq_cached(env, args[i], syms.k_escape))
+      { esc = args[i + 1]; h_esc = true; }
+    else if (kw_eq_cached(env, args[i], syms.k_pretty))
+      { pretty = args[i + 1]; h_pretty = true; }
+    else if (kw_eq_cached(env, args[i], syms.k_circle))
+      { circle = args[i + 1]; h_circle = true; }
+    else if (kw_eq_cached(env, args[i], syms.k_level))
+      { level = args[i + 1]; h_level = true; }
+    else if (kw_eq_cached(env, args[i], syms.k_length))
+      { length = args[i + 1]; h_length = true; }
+    else if (kw_eq_cached(env, args[i], syms.k_base))
+      { base = args[i + 1]; h_base = true; }
+    else if (kw_eq_cached(env, args[i], syms.k_radix))
+      { radix = args[i + 1]; h_radix = true; }
+    else if (kw_eq_cached(env, args[i], syms.k_case))
+      { kase = args[i + 1]; h_case = true; }
+    else if (kw_eq_cached(env, args[i], syms.k_gensym))
+      { gensym = args[i + 1]; h_gensym = true; }
+    else if (kw_eq_cached(env, args[i], syms.k_readably))
+      { readably = args[i + 1]; h_readably = true; }
+    else if (kw_eq_cached(env, args[i], syms.k_array))
+      { array = args[i + 1]; h_array = true; }
   }
 
-  /* Use prin1-to-string + write to stream */
-  if (s && stream_is_open(s)) {
-    emacs_value str = efuncall_cached(env, syms.fn_prin1_to_string, 1, &obj);
+  /* bind print variables, call prin1-to-string, restore */
+  emacs_value o_esc = syms.v_nil, o_pretty = syms.v_nil, o_circle = syms.v_nil;
+  emacs_value o_level = syms.v_nil, o_length = syms.v_nil, o_base = syms.v_nil;
+  emacs_value o_radix = syms.v_nil, o_case = syms.v_nil;
+  emacs_value o_gensym = syms.v_nil, o_array = syms.v_nil;
+  emacs_value o_readably = syms.v_nil;
+
+  if (h_esc)     { emacs_value sn = eintern(env, "print-escape");
+                   o_esc = write_bind_var(env, sn, esc); }
+  if (h_pretty)  { emacs_value sn = eintern(env, "print-pretty");
+                   o_pretty = write_bind_var(env, sn, pretty); }
+  if (h_circle)  { emacs_value sn = eintern(env, "print-circle");
+                   o_circle = write_bind_var(env, sn, circle); }
+  if (h_level)   { emacs_value sn = eintern(env, "print-level");
+                   o_level = write_bind_var(env, sn, level); }
+  if (h_length)  { emacs_value sn = eintern(env, "print-length");
+                   o_length = write_bind_var(env, sn, length); }
+  if (h_base)    { emacs_value sn = eintern(env, "print-base");
+                   o_base = write_bind_var(env, sn, base); }
+  if (h_radix)   { emacs_value sn = eintern(env, "print-radix");
+                   o_radix = write_bind_var(env, sn, radix); }
+  if (h_case)    { emacs_value sn = eintern(env, "print-case");
+                   o_case = write_bind_var(env, sn, kase); }
+  if (h_gensym)  { emacs_value sn = eintern(env, "print-gensym");
+                   o_gensym = write_bind_var(env, sn, gensym); }
+  if (h_readably){ emacs_value sn = eintern(env, "print-readably");
+                   o_readably = write_bind_var(env, sn, readably); }
+  if (h_array)   { emacs_value sn = eintern(env, "print-array");
+                   o_array = write_bind_var(env, sn, array); }
+
+  emacs_value str = efuncall_cached(env, syms.fn_prin1_to_string, 1, &obj);
+
+  if (h_esc)     { emacs_value sn = eintern(env, "print-escape");
+                   write_restore_var(env, sn, o_esc); }
+  if (h_pretty)  { emacs_value sn = eintern(env, "print-pretty");
+                   write_restore_var(env, sn, o_pretty); }
+  if (h_circle)  { emacs_value sn = eintern(env, "print-circle");
+                   write_restore_var(env, sn, o_circle); }
+  if (h_level)   { emacs_value sn = eintern(env, "print-level");
+                   write_restore_var(env, sn, o_level); }
+  if (h_length)  { emacs_value sn = eintern(env, "print-length");
+                   write_restore_var(env, sn, o_length); }
+  if (h_base)    { emacs_value sn = eintern(env, "print-base");
+                   write_restore_var(env, sn, o_base); }
+  if (h_radix)   { emacs_value sn = eintern(env, "print-radix");
+                   write_restore_var(env, sn, o_radix); }
+  if (h_case)    { emacs_value sn = eintern(env, "print-case");
+                   write_restore_var(env, sn, o_case); }
+  if (h_gensym)  { emacs_value sn = eintern(env, "print-gensym");
+                   write_restore_var(env, sn, o_gensym); }
+  if (h_readably){ emacs_value sn = eintern(env, "print-readably");
+                   write_restore_var(env, sn, o_readably); }
+  if (h_array)   { emacs_value sn = eintern(env, "print-array");
+                   write_restore_var(env, sn, o_array); }
+
+  if (s && stream_is_open(s))
     stream_write_string(env, s, str);
-  }
 
   return obj;
 }
@@ -233,9 +329,7 @@ emacs_value Fprinc(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   emacs_value str = efuncall_cached(env, syms.fn_prin1_to_string, 1, args);
-  /* for strings: strip quotes for princ */
-  if (env->eq(env, env->type_of(env, args[0]),
-              eintern(env, "string"))) {
+  if (env->eq(env, env->type_of(env, args[0]), syms.v_string)) {
     ptrdiff_t slen = 0;
     char *cstr = estring_alloc(env, str, &slen);
     if (cstr && slen >= 2 && cstr[0] == '"' && cstr[slen - 1] == '"') {
@@ -245,7 +339,14 @@ emacs_value Fprinc(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     }
     free(cstr);
   }
-  stream_write_string(env, s, str);
+  {
+    ptrdiff_t slen = 0;
+    char *cstr = estring_alloc(env, str, &slen);
+    if (cstr) {
+      stream_write(s, cstr, slen);
+      free(cstr);
+    }
+  }
   return args[0];
 }
 
@@ -254,13 +355,18 @@ emacs_value Fprinc(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 emacs_value Fprint(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                     void *data) {
   (void)data;
-  /* cl-print = print with newline before */
+  /* CL: newline + prin1 + space */
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 1, syms.var_sout);
   if (s && stream_is_open(s)) {
     unsigned char nl = '\n';
     stream_write(s, &nl, 1);
   }
-  return Fprin1(env, nargs, args, data);
+  emacs_value result = Fprin1(env, nargs, args, data);
+  if (s && stream_is_open(s)) {
+    unsigned char sp = ' ';
+    stream_write(s, &sp, 1);
+  }
+  return result;
 }
 
 /* ── cl-prin1-to-string, cl-princ-to-string ──────────────────────────── */
@@ -277,9 +383,7 @@ emacs_value Fprinc_to_string(emacs_env *env, ptrdiff_t nargs,
   (void)data;
   if (nargs < 1) { signal_error(env, "Requires 1 argument"); return syms.v_nil; }
   emacs_value str = efuncall_cached(env, syms.fn_prin1_to_string, 1, args);
-  /* for strings: remove surrounding quotes that prin1 added */
-  if (env->eq(env, env->type_of(env, args[0]),
-              eintern(env, "string"))) {
+  if (env->eq(env, env->type_of(env, args[0]), syms.v_string)) {
     ptrdiff_t slen = 0;
     char *cstr = estring_alloc(env, str, &slen);
     if (cstr && slen >= 2 && cstr[0] == '"' && cstr[slen - 1] == '"') {

@@ -125,31 +125,70 @@ emacs_value Fread_byte(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   return eint(env, b);
 }
 
+/* ── cl-read-char-no-hang ──────────────────────────────────────────────── */
+
+emacs_value Fread_char_no_hang(emacs_env *env, ptrdiff_t nargs,
+                                emacs_value *args, void *data) {
+  (void)data;
+  /* (cl-read-char-no-hang &optional stream eof-error-p eof-value) */
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
+  check_open(env, s, "cl-read-char-no-hang");
+
+  if (!stream_listen(s)) return syms.v_nil;
+
+  unsigned char ch;
+  ptrdiff_t r = stream_read(s, &ch, 1);
+  if (r <= 0) return syms.v_nil;
+  return eint(env, ch);
+}
+
 /* ── cl-peek-char ──────────────────────────────────────────────────────── */
+
+static bool is_whitespace(int ch) {
+  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
+}
 
 emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                        void *data) {
   (void)data;
   /* (cl-peek-char &optional peek-type stream eof-error-p eof-value) */
-  /* Simplified: just peek one character. */
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs,
                                           (nargs >= 1) ? 1 : 0,
                                           syms.var_sin);
   check_open(env, s, "cl-peek-char");
 
-  if (!stream_listen(s)) {
-    return syms.v_nil;
+  /*
+   * peek-type nil  → peek at next char without consuming
+   * peek-type t    → skip whitespace, then peek
+   * peek-type char → skip until that char seen, then peek at next
+   */
+  emacs_value peek_type = (nargs >= 1) ? args[0] : syms.v_nil;
+  bool skip_ws = env->eq(env, peek_type, syms.v_t);
+  bool skip_to_char = false;
+  int target = 0;
+
+  if (!skip_ws && env->is_not_nil(env, peek_type)) {
+    skip_to_char = true;
+    target = (int)eint_extract(env, peek_type);
   }
 
-  /* read one char, push it back via stream_unread */
-  unsigned char ch;
-  ptrdiff_t r = stream_read(s, &ch, 1);
-  if (r <= 0) {
-    return syms.v_nil;
+  for (;;) {
+    if (!stream_listen(s)) return syms.v_nil;
+
+    unsigned char ch;
+    ptrdiff_t r = stream_read(s, &ch, 1);
+    if (r <= 0) return syms.v_nil;
+
+    if (skip_ws && is_whitespace((int)ch))
+      continue;             /* discard whitespace */
+
+    if (skip_to_char && (int)ch == target)
+      continue;             /* discard matching char */
+
+    /* found the char to peek — push it back and return */
+    stream_unread(s, ch);
+    return eint(env, ch);
   }
-  /* push it back */
-  stream_unread(s, ch);
-  return eint(env, ch);
 }
 
 /* ── cl-unread-char ────────────────────────────────────────────────────── */

@@ -126,9 +126,13 @@ emacs_value Fterpri(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 emacs_value Ffresh_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                          void *data) {
   (void)data;
-  /* TODO: track column; always writes newline for now */
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sout);
   check_open(env, s, "cl-fresh-line");
+
+  /* column 0 or last char was newline → already at BOL */
+  if (s->column == 0 || s->last_char == '\n')
+    return syms.v_nil;
+
   unsigned char nl = '\n';
   stream_write(s, &nl, 1);
   return syms.v_t;

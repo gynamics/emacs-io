@@ -19,6 +19,7 @@ static void      fds_clear_input(cl_stream_t *s);
 static void      fds_clear_output(cl_stream_t *s);
 static ptrdiff_t fds_file_position(cl_stream_t *s);
 static bool      fds_set_file_position(cl_stream_t *s, ptrdiff_t pos);
+static ptrdiff_t fds_file_length(cl_stream_t *s);
 
 static const cl_stream_ops_t fd_stream_ops = {
   .read         = fds_read,
@@ -32,6 +33,7 @@ static const cl_stream_ops_t fd_stream_ops = {
   .clear_output = fds_clear_output,
   .file_position = fds_file_position,
   .set_file_position = fds_set_file_position,
+  .file_length    = fds_file_length,
 };
 
 /* ── create / destroy ────────────────────────────────────────────────── */
@@ -309,4 +311,16 @@ static bool fds_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
   if (fi->wlen > 0) fds_flush(s);
   fi->rpos = 0; fi->rlen = 0;
   return lseek(fi->fd, (off_t)pos, SEEK_SET) >= 0;
+}
+
+static ptrdiff_t fds_file_length(cl_stream_t *s) {
+  fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
+  if (!fi || fi->fd < 0) return -1;
+  if (fi->wlen > 0) fds_flush(s);
+  off_t cur = lseek(fi->fd, 0, SEEK_CUR);
+  if (cur < 0) return -1;
+  off_t end = lseek(fi->fd, 0, SEEK_END);
+  if (end < 0) { lseek(fi->fd, cur, SEEK_SET); return -1; }
+  lseek(fi->fd, cur, SEEK_SET);
+  return (ptrdiff_t)end;
 }

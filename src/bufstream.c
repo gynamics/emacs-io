@@ -11,6 +11,7 @@ static bool      bis_listen(cl_stream_t *s);
 static void      bis_destroy(cl_stream_t *s);
 static ptrdiff_t bis_file_position(cl_stream_t *s);
 static bool      bis_set_file_position(cl_stream_t *s, ptrdiff_t pos);
+static ptrdiff_t bis_file_length(cl_stream_t *s);
 
 static const cl_stream_ops_t buffer_input_ops = {
   .read    = bis_read,
@@ -22,6 +23,7 @@ static const cl_stream_ops_t buffer_input_ops = {
   .destroy = bis_destroy,
   .file_position = bis_file_position,
   .set_file_position = bis_set_file_position,
+  .file_length    = bis_file_length,
 };
 
 typedef struct {
@@ -183,4 +185,10 @@ static bool bis_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
   bi->chunk_len = 0;
   bi->pos = pos;
   return true;
+}
+
+static ptrdiff_t bis_file_length(cl_stream_t *s) {
+  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
+  if (!bi) return -1;
+  return bi->end;
 }

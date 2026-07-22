@@ -39,6 +39,19 @@ ptrdiff_t stream_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
   if (!atomic_load(&s->open)) return 0;
   LOCK(s);
   ptrdiff_t r = s->ops->write(s, buf, n);
+
+  /* column tracking for cl-fresh-line */
+  if (r > 0) {
+    const unsigned char *p = (const unsigned char *)buf;
+    ptrdiff_t after_nl = 0;
+    bool found_nl = false;
+    for (ptrdiff_t i = r - 1; i >= 0; i--) {
+      if (p[i] == '\n') { after_nl = r - 1 - i; found_nl = true; break; }
+    }
+    s->column = found_nl ? after_nl : s->column + r;
+    s->last_char = (int)p[r - 1];
+  }
+
   UNLOCK(s);
   return r;
 }
@@ -156,6 +169,14 @@ bool stream_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
   if (!atomic_load(&s->open)) return false;
   LOCK(s);
   bool r = s->ops->set_file_position(s, pos);
+  UNLOCK(s);
+  return r;
+}
+
+ptrdiff_t stream_file_length(cl_stream_t *s) {
+  if (!s || !s->ops || !s->ops->file_length) return -1;
+  LOCK(s);
+  ptrdiff_t r = s->ops->file_length(s);
   UNLOCK(s);
   return r;
 }
