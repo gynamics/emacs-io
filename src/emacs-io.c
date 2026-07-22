@@ -100,6 +100,8 @@ extern emacs_value Ffile_position(emacs_env *env, ptrdiff_t nargs,
 
   extern emacs_value Ffile_length(emacs_env *env, ptrdiff_t nargs,
                                   emacs_value *args, void *data);
+extern emacs_value Fftruncate(emacs_env *env, ptrdiff_t nargs,
+                               emacs_value *args, void *data);
 
   extern emacs_value Fstream_external_format(emacs_env *env, ptrdiff_t nargs,
                                             emacs_value *args, void *data);
@@ -541,6 +543,13 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "Returns a non-negative integer if the stream supports length\n"
         "queries, or nil if the length cannot be determined.\n"
         "\n(fn STREAM)", NULL);
+
+  defun(env, "cl-ftruncate", Fftruncate, 2, 2,
+        "Truncate the file associated with STREAM to LENGTH bytes.\n"
+        "\n"
+        "STREAM must be an open file stream backed by a regular file.\n"
+        "Returns t on success, nil if truncation is not supported.\n"
+        "\n(fn STREAM LENGTH)", NULL);
 
   defun(env, "cl-file-string-length", Ffile_string_length, 2, 2,
         "Return the byte count of OBJECT's printed representation.\n"

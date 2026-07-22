@@ -1091,5 +1091,17 @@
       (should (equal (buffer-string) "ABCXX")))
     (kill-buffer buf)))
 
+(ert-deftest emacs-io-test-ftruncate ()
+  "Test cl-ftruncate on a file stream."
+  (emacs-io-test--with-temp-file f
+    (with-temp-file f (insert "abcdefgh"))
+    (let ((s (cl-open f :direction :io :if-exists :overwrite)))
+      (should (equal (cl-file-length s) 8))
+      (should (cl-ftruncate s 3))
+      (should (equal (cl-file-length s) 3))
+      (should (cl-file-position s 0))
+      (should (equal (cl-read-line s) '("abc" t)))
+      (cl-close s))))
+
 (provide 'emacs-io-test)
 ;;; emacs-io-test.el ends here

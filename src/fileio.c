@@ -344,3 +344,23 @@ emacs_value Ffile_string_length(emacs_env *env, ptrdiff_t nargs,
     return syms.v_nil;
   return eint(env, slen > 0 ? slen - 1 : 0);
 }
+
+emacs_value Fftruncate(emacs_env *env, ptrdiff_t nargs,
+                        emacs_value *args, void *data) {
+  (void)data;
+  if (nargs < 2) {
+    signal_error(env, "cl-ftruncate requires 2 arguments");
+    return syms.v_nil;
+  }
+  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
+  if (!s || !stream_is_open(s)) {
+    signal_error(env, "Stream is closed");
+    return syms.v_nil;
+  }
+  ptrdiff_t len = eint_extract(env, args[1]);
+  if (len < 0) {
+    signal_error(env, "cl-ftruncate: length must be non-negative");
+    return syms.v_nil;
+  }
+  return stream_truncate(s, len) ? syms.v_t : syms.v_nil;
+}

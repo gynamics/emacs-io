@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "stream.h"
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,7 @@ static void      fds_clear_output(cl_stream_t *s);
 static ptrdiff_t fds_file_position(cl_stream_t *s);
 static bool      fds_set_file_position(cl_stream_t *s, ptrdiff_t pos);
 static ptrdiff_t fds_file_length(cl_stream_t *s);
+static bool      fds_truncate(cl_stream_t *s, ptrdiff_t len);
 
 static const cl_stream_ops_t fd_stream_ops = {
   .read         = fds_read,
@@ -34,6 +36,7 @@ static const cl_stream_ops_t fd_stream_ops = {
   .file_position = fds_file_position,
   .set_file_position = fds_set_file_position,
   .file_length    = fds_file_length,
+  .truncate    = fds_truncate,
 };
 
 /* ── create / destroy ────────────────────────────────────────────────── */
@@ -323,4 +326,12 @@ static ptrdiff_t fds_file_length(cl_stream_t *s) {
   if (end < 0) { lseek(fi->fd, cur, SEEK_SET); return -1; }
   lseek(fi->fd, cur, SEEK_SET);
   return (ptrdiff_t)end;
+}
+
+static bool fds_truncate(cl_stream_t *s, ptrdiff_t len) {
+  fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
+  if (!fi || fi->fd < 0) return false;
+  /* flush write buffer before truncating */
+  if (fi->wlen > 0) fds_flush(s);
+  return ftruncate(fi->fd, (off_t)len) == 0;
 }

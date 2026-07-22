@@ -21,7 +21,7 @@ ring buffers, zero copy within string streams, and no hook machinery.
 ```
 $ make             # → emacs-io.so
 $ make verify      # confirm module loads in Emacs
-$ make test        # 83 unit tests
+$ make test        # 128 unit tests
 $ make bench       # 12 performance benchmarks
 ```
 
@@ -36,7 +36,9 @@ $ make bench       # 12 performance benchmarks
 | `cl-open` | POSIX `open(2)`, 8 KB ring buffers, `O_NONBLOCK` support | any |
 | `cl-make-string-input-stream` | C `const char*` with position cursor | input |
 | `cl-make-string-output-stream` | Block-chain growable accumulator | output |
-| `cl-make-buffer-input-stream` | Emacs buffer via `buffer-substring-no-properties`, 64 KB chunks | input |
+| `cl-make-buffer-input-stream` | Emacs buffer snapshot at creation time | input |
+| `cl-make-buffer-output-stream` | Writes insert into an Emacs buffer | output |
+| `cl-make-buffer-io-stream` | Snapshot reads + buffer inserts, shared cursor | input / output |
 
 Standard streams (`*standard-input*`, `*standard-output*`, `*error-output*`,
 `*trace-output*`, `*debug-io*`, `*query-io*`, `*terminal-io*`) are
@@ -55,6 +57,7 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 | `cl-output-stream-p` | `(cl-output-stream-p stream)` | Return t if stream supports output |
 | `cl-stream-element-type` | `(cl-stream-element-type stream)` | Return the type of elements read/written |
 | `cl-file-position` | `(cl-file-position stream &optional position)` | Return or set the current position |
+| `cl-ftruncate` | `(cl-ftruncate stream length)` | Truncate file stream to given length |
 | `cl-file-regular-p` | `(cl-file-regular-p stream)` | Return t if stream is a regular file |
 | `cl-file-tty-p` | `(cl-file-tty-p stream)` | Return t if stream is a terminal |
 
@@ -66,6 +69,8 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 | `cl-make-string-output-stream` | `(cl-make-string-output-stream &key element-type size)` | Create an output stream that accumulates in a string |
 | `cl-get-output-stream-string` | `(cl-get-output-stream-string stream)` | Return the accumulated output as a string |
 | `cl-make-buffer-input-stream` | `(cl-make-buffer-input-stream buffer &key start end)` | Create an input stream from a buffer's text |
+| `cl-make-buffer-output-stream` | `(cl-make-buffer-output-stream buffer)` | Create an output stream that inserts into a buffer |
+| `cl-make-buffer-io-stream` | `(cl-make-buffer-io-stream buffer &key start end)` | Bidirectional buffer stream (reads snapshot, writes to buffer) |
 
 ### Character I/O
 

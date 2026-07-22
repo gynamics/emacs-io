@@ -186,3 +186,13 @@ ptrdiff_t stream_file_length(cl_stream_t *s) {
   UNLOCK(s);
   return r;
 }
+
+bool stream_truncate(cl_stream_t *s, ptrdiff_t len) {
+  if (!s || len < 0 || !s->ops || !s->ops->truncate) return false;
+  if (!atomic_load(&s->open)) return false;
+  RESOLVE(s);
+  LOCK(s);
+  bool r = s->ops->truncate(s, len);
+  UNLOCK(s);
+  return r;
+}
