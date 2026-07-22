@@ -1064,5 +1064,16 @@
       (should (equal (buffer-string) "ABCD")))
     (kill-buffer buf)))
 
+(ert-deftest emacs-io-test-buffer-output-stream-bytes-only ()
+  "Test byte-only writes flushed on close."
+  (let ((buf (generate-new-buffer " *bos-test3*")))
+    (let ((s (cl-make-buffer-output-stream buf)))
+      (cl-write-char ?X s)
+      (cl-write-char ?Y s)
+      (cl-close s))
+    (with-current-buffer buf
+      (should (equal (buffer-string) "XY")))
+    (kill-buffer buf)))
+
 (provide 'emacs-io-test)
 ;;; emacs-io-test.el ends here

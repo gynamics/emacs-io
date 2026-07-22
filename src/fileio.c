@@ -173,6 +173,11 @@ emacs_value Fclose(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     return syms.v_nil;
   }
 
+  /* flush pending buffer-output-stream content before close */
+  extern void bos_flush_pending(emacs_env *env, cl_stream_t *s);
+  if (s->ops == &buffer_output_ops)
+    bos_flush_pending(env, s);
+
   /* :abort — discard output without flushing */
   for (ptrdiff_t i = 1; i < nargs - 1; i += 2) {
     if (kw_eq_cached(env, args[i], syms.k_abort) &&

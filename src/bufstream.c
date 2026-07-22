@@ -178,7 +178,7 @@ static void      bos_clear_output(cl_stream_t *s);
 static ptrdiff_t bos_file_position(cl_stream_t *s);
 static ptrdiff_t bos_file_length(cl_stream_t *s);
 
-static const cl_stream_ops_t buffer_output_ops = {
+const cl_stream_ops_t buffer_output_ops = {
   .read         = NULL,
   .write        = bos_write,
   .write_string = bos_write_string,
@@ -242,6 +242,14 @@ static int bos_close(cl_stream_t *s) {
   }
   atomic_store(&s->open, false);
   return 0;
+}
+
+void bos_flush_pending(emacs_env *env, cl_stream_t *s) {
+  buffer_output_full_t *bo = (buffer_output_full_t *)s->impl;
+  if (!bo || !bo->sb || bo->sb->len == 0) return;
+  bos_insert(env, bo, bo->sb->data, (ptrdiff_t)bo->sb->len);
+  bo->sb->len = 0;
+  bo->sb->data[0] = '\0';
 }
 
 static void bos_destroy(cl_stream_t *s) {
