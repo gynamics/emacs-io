@@ -675,7 +675,20 @@
       (should (equal (aref v 1) ?b))
       (should (equal (aref v 2) 0)))))
 
-;; ── read-char eof-error-p ─────────────────────────────────────────────────
+(ert-deftest emacs-io-test-read-sequence-list ()
+  "Test cl-read-sequence with a list."
+  (emacs-io-test--with-string-input "abc"
+    (let ((lst (list 0 0 0)))
+      (should (equal (cl-read-sequence lst stream) 3))
+      (should (equal (car lst) ?a))
+      (should (equal (cadr lst) ?b))
+      (should (equal (caddr lst) ?c)))))
+
+(ert-deftest emacs-io-test-write-sequence-list ()
+  "Test cl-write-sequence with a list."
+  (let ((result (emacs-io-test--with-string-output
+                  (cl-write-sequence (list 72 101 108 108 111) stream))))
+    (should (equal result "Hello"))))
 
 (ert-deftest emacs-io-test-read-char-eof-error ()
   "Test cl-read-char signals error on EOF by default."

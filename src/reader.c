@@ -235,11 +235,19 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   if (!s || !stream_is_open(s))
     signal_error(env, "Stream is closed");
 
-  ptrdiff_t len = env->vec_size(env, seq);
+  bool is_vec = env->eq(env, env->type_of(env, seq), eintern(env, "vector"));
+  bool is_list = !is_vec && env->eq(env, env->type_of(env, seq),
+                                     eintern(env, "cons"));
+  if (!is_vec && !is_list) {
+    signal_error(env, "cl-read-sequence: SEQUENCE must be a vector or list");
+    return syms.v_nil;
+  }
+
+  ptrdiff_t len = is_vec ? env->vec_size(env, seq)
+                         : 1 << 30;
   ptrdiff_t start = 0;
   ptrdiff_t end = len;
 
-  /* parse &key start end */
   for (ptrdiff_t i = 2; i < nargs; i += 2) {
     if (i + 1 >= nargs) break;
     if (kw_eq_cached(env, args[i], syms.k_start))
@@ -249,20 +257,37 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   if (start < 0) start = 0;
-  if (end > len) end = len;
+  if (is_vec && end > len) end = len;
   ptrdiff_t count = end - start;
   if (count <= 0) return eint(env, start);
 
-  /* read a chunk and set vector elements */
-  unsigned char *buf = malloc((size_t)count);
-  if (!buf) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
+  if (is_vec) {
+    unsigned char *buf = malloc((size_t)count);
+    if (!buf) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
 
-  ptrdiff_t r = stream_read(s, buf, count);
-  for (ptrdiff_t i = 0; i < r && i < count; i++)
-    env->vec_set(env, seq, start + i, eint(env, buf[i]));
+    ptrdiff_t r = stream_read(s, buf, count);
+    for (ptrdiff_t i = 0; i < r && i < count; i++)
+      env->vec_set(env, seq, start + i, eint(env, buf[i]));
 
-  free(buf);
-  return eint(env, start + (r > 0 ? r : 0));
+    free(buf);
+    return eint(env, start + (r > 0 ? r : 0));
+  }
+
+  /* list: advance to start, read one byte per element */
+  emacs_value cell = seq;
+  for (ptrdiff_t i = 0; i < start && env->is_not_nil(env, cell); i++)
+    cell = efuncall(env, "cdr", 1, &cell);
+
+  ptrdiff_t i = 0;
+  while (i < count && env->is_not_nil(env, cell)) {
+    unsigned char b;
+    ptrdiff_t r = stream_read(s, &b, 1);
+    if (r <= 0) break;
+    efuncall(env, "setcar", 2, (emacs_value[]){ cell, eint(env, b) });
+    cell = efuncall(env, "cdr", 1, &cell);
+    i++;
+  }
+  return eint(env, start + i);
 }
 
 /* ── cl-read-string ────────────────────────────────────────────────────── */

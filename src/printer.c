@@ -212,7 +212,15 @@ emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   cl_stream_t *s = euser_ptr_stream_get(env, args[1]);
   check_open(env, s, "cl-write-sequence");
 
-  ptrdiff_t len = env->vec_size(env, seq);
+  bool is_vec = env->eq(env, env->type_of(env, seq), eintern(env, "vector"));
+  bool is_list = !is_vec && env->eq(env, env->type_of(env, seq),
+                                     eintern(env, "cons"));
+  if (!is_vec && !is_list) {
+    signal_error(env, "cl-write-sequence: SEQUENCE must be a vector or list");
+    return syms.v_nil;
+  }
+
+  ptrdiff_t len = is_vec ? env->vec_size(env, seq) : 1 << 30;
   ptrdiff_t start = 0;
   ptrdiff_t end = len;
 
@@ -225,17 +233,35 @@ emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   if (start < 0) start = 0;
-  if (end > len) end = len;
+  if (is_vec && end > len) end = len;
   ptrdiff_t count = end - start;
   if (count <= 0) return seq;
 
-  unsigned char *buf = malloc((size_t)count);
-  if (!buf) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
+  if (is_vec) {
+    unsigned char *buf = malloc((size_t)count);
+    if (!buf) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
 
-  for (ptrdiff_t i = 0; i < count; i++)
-    buf[i] = (unsigned char)eint_extract(env, env->vec_get(env, seq, start + i));
+    for (ptrdiff_t i = 0; i < count; i++)
+      buf[i] = (unsigned char)eint_extract(env,
+                env->vec_get(env, seq, start + i));
 
-  stream_write(s, buf, count);
-  free(buf);
+    stream_write(s, buf, count);
+    free(buf);
+    return seq;
+  }
+
+  /* list: advance to start, write one element at a time */
+  emacs_value cell = seq;
+  for (ptrdiff_t i = 0; i < start && env->is_not_nil(env, cell); i++)
+    cell = efuncall(env, "cdr", 1, &cell);
+
+  ptrdiff_t i = 0;
+  while (i < count && env->is_not_nil(env, cell)) {
+    unsigned char b = (unsigned char)eint_extract(env,
+                       efuncall(env, "car", 1, &cell));
+    stream_write(s, &b, 1);
+    cell = efuncall(env, "cdr", 1, &cell);
+    i++;
+  }
   return seq;
 }
