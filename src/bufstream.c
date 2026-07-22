@@ -167,3 +167,148 @@ emacs_value Fmake_buffer_input_stream(emacs_env *env, ptrdiff_t nargs,
   }
   return euser_ptr_stream_make(env, s);
 }
+
+/* ── buffer output stream ────────────────────────────────────────────── */
+
+static ptrdiff_t bos_write(cl_stream_t *s, const void *buf, ptrdiff_t n);
+static ptrdiff_t bos_write_string(emacs_env *env, cl_stream_t *s, emacs_value str);
+static int       bos_close(cl_stream_t *s);
+static void      bos_destroy(cl_stream_t *s);
+static void      bos_clear_output(cl_stream_t *s);
+static ptrdiff_t bos_file_position(cl_stream_t *s);
+static ptrdiff_t bos_file_length(cl_stream_t *s);
+
+static const cl_stream_ops_t buffer_output_ops = {
+  .read         = NULL,
+  .write        = bos_write,
+  .write_string = bos_write_string,
+  .close        = bos_close,
+  .flush        = NULL,
+  .finish       = NULL,
+  .listen       = NULL,
+  .destroy      = bos_destroy,
+  .clear_output = bos_clear_output,
+  .file_position = bos_file_position,
+  .file_length   = bos_file_length,
+};
+
+typedef struct {
+  emacs_value buffer_ref;   /* global ref to target buffer */
+  strbuf_t   *sb;            /* accumulated byte writes */
+} buffer_output_full_t;
+
+static void bos_insert(emacs_env *env, buffer_output_full_t *bo,
+                        const char *data, ptrdiff_t len) {
+  if (!bo || !bo->buffer_ref || !env || len <= 0) return;
+  /* switch to target buffer, insert data, restore */
+  emacs_value old = efuncall(env, "current-buffer", 0, NULL);
+  efuncall(env, "set-buffer", 1, &bo->buffer_ref);
+  emacs_value str = env->make_string(env, data, len);
+  efuncall(env, "insert", 1, &str);
+  efuncall(env, "set-buffer", 1, &old);
+}
+
+static ptrdiff_t bos_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
+  if (!s || !buf || n <= 0) return 0;
+  buffer_output_full_t *bo = (buffer_output_full_t *)s->impl;
+  if (!bo) return -1;
+  if (!strbuf_append(bo->sb, (const char *)buf, n)) return -1;
+  return n;
+}
+
+static ptrdiff_t bos_write_string(emacs_env *env, cl_stream_t *s, emacs_value str) {
+  buffer_output_full_t *bo = (buffer_output_full_t *)s->impl;
+  if (!bo) return -1;
+  /* flush any accumulated byte writes first */
+  if (bo->sb->len > 0) {
+    bos_insert(env, bo, bo->sb->data, (ptrdiff_t)bo->sb->len);
+    bo->sb->len = 0;
+    bo->sb->data[0] = '\0';
+  }
+  /* extract the string and insert to buffer */
+  ptrdiff_t slen = 0;
+  char *cstr = estring_alloc(env, str, &slen);
+  if (!cstr) return -1;
+  bos_insert(env, bo, cstr, slen);
+  free(cstr);
+  return slen;
+}
+
+static int bos_close(cl_stream_t *s) {
+  buffer_output_full_t *bo = (buffer_output_full_t *)s->impl;
+  if (bo) {
+    strbuf_free(bo->sb);
+    bo->sb = NULL;
+  }
+  atomic_store(&s->open, false);
+  return 0;
+}
+
+static void bos_destroy(cl_stream_t *s) {
+  buffer_output_full_t *bo = (buffer_output_full_t *)s->impl;
+  if (bo) free(bo);
+}
+
+static void bos_clear_output(cl_stream_t *s) {
+  buffer_output_full_t *bo = (buffer_output_full_t *)s->impl;
+  if (bo && bo->sb) { bo->sb->len = 0; bo->sb->data[0] = '\0'; }
+}
+
+static ptrdiff_t bos_file_position(cl_stream_t *s) {
+  buffer_output_full_t *bo = (buffer_output_full_t *)s->impl;
+  if (!bo || !bo->sb) return -1;
+  return (ptrdiff_t)bo->sb->len;
+}
+
+static ptrdiff_t bos_file_length(cl_stream_t *s) {
+  buffer_output_full_t *bo = (buffer_output_full_t *)s->impl;
+  if (!bo || !bo->sb) return -1;
+  return (ptrdiff_t)bo->sb->len;
+}
+
+cl_stream_t *stream_create_buffer_output(emacs_env *env, emacs_value buffer) {
+  buffer_output_full_t *bo = calloc(1, sizeof(*bo));
+  if (!bo) return NULL;
+
+  bo->buffer_ref = env->make_global_ref(env, buffer);
+  bo->sb = strbuf_create(4096);
+  if (!bo->sb) {
+    env->free_global_ref(env, bo->buffer_ref);
+    free(bo);
+    return NULL;
+  }
+
+  cl_stream_t *s = calloc(1, sizeof(*s));
+  if (!s) {
+    env->free_global_ref(env, bo->buffer_ref);
+    strbuf_free(bo->sb);
+    free(bo);
+    return NULL;
+  }
+
+  s->ops = &buffer_output_ops;
+  s->impl = bo;
+  s->flags = CL_STREAM_FLAG_OUTPUT;
+  atomic_init(&s->open, true);
+  pthread_mutex_init(&s->mutex, NULL);
+
+  return s;
+}
+
+/* ── cl-make-buffer-output-stream ─────────────────────────────────── */
+
+emacs_value Fmake_buffer_output_stream(emacs_env *env, ptrdiff_t nargs,
+                                        emacs_value *args, void *data) {
+  (void)data;
+  if (nargs < 1) {
+    signal_error(env, "cl-make-buffer-output-stream requires 1 argument (buffer)");
+    return syms.v_nil;
+  }
+
+  cl_stream_t *s = stream_create_buffer_output(env, args[0]);
+  if (!s) {
+    signal_error(env, "Cannot create buffer output stream");
+    return syms.v_nil;
+  }
+  return euser_ptr_stream_make(env, s);
+}

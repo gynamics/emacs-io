@@ -87,6 +87,8 @@ extern emacs_value Fstream_element_type(emacs_env *env, ptrdiff_t nargs,
                                          emacs_value *args, void *data);
 extern emacs_value Fmake_buffer_input_stream(emacs_env *env, ptrdiff_t nargs,
                                                emacs_value *args, void *data);
+extern emacs_value Fmake_buffer_output_stream(emacs_env *env, ptrdiff_t nargs,
+                                               emacs_value *args, void *data);
 extern emacs_value Ffile_regular_p(emacs_env *env, ptrdiff_t nargs,
                                     emacs_value *args, void *data);
 extern emacs_value Ffile_tty_p(emacs_env *env, ptrdiff_t nargs,
@@ -399,6 +401,14 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "The stream reads buffer text in 64 KB chunks for efficiency.\n"
         "\n(fn BUFFER &key START END)", NULL);
 
+
+  defun(env, "cl-make-buffer-output-stream", Fmake_buffer_output_stream, 1, 1,
+        "Return an output stream that inserts content into BUFFER.\n"
+        "\n"
+        "String writes (write-string, prin1, etc.) are inserted immediately.\n"
+        "Byte writes (write-char, write-byte) are buffered and flushed\n"
+        "on the next string write.\n"
+        "\n(fn BUFFER)", NULL);
   /* ── compound streams ─────────────────────────────────────────────── */
   defun(env, "cl-make-synonym-stream", Fmake_synonym_stream, 1, 1,
         "Return a stream that redirects I/O to SYMBOL's value.\n"

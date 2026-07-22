@@ -1040,5 +1040,29 @@
       (cl-close stream))
     (kill-buffer buf)))
 
+(ert-deftest emacs-io-test-buffer-output-stream ()
+  "Test cl-make-buffer-output-stream."
+  (let ((buf (generate-new-buffer " *bos-test*")))
+    (let ((s (cl-make-buffer-output-stream buf)))
+      (cl-write-string "hello" s)
+      (cl-write-string " world" s)
+      (cl-close s))
+    (with-current-buffer buf
+      (should (equal (buffer-string) "hello world")))
+    (kill-buffer buf)))
+
+(ert-deftest emacs-io-test-buffer-output-stream-write-char ()
+  "Test cl-write-char on buffer output stream."
+  (let ((buf (generate-new-buffer " *bos-test2*")))
+    (let ((s (cl-make-buffer-output-stream buf)))
+      (cl-write-char ?A s)
+      (cl-write-char ?B s)
+      (cl-write-string "CD" s)
+      (cl-close s))
+    (with-current-buffer buf
+      ;; ABC are buffered byte writes, flushed on write-string "CD"
+      (should (equal (buffer-string) "ABCD")))
+    (kill-buffer buf)))
+
 (provide 'emacs-io-test)
 ;;; emacs-io-test.el ends here

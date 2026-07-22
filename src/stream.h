@@ -149,6 +149,7 @@ cl_stream_t *stream_create_string_input(const char *data, size_t len);
 cl_stream_t *stream_create_string_output(size_t hint_size);
 cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
                                         ptrdiff_t start, ptrdiff_t end);
+cl_stream_t *stream_create_buffer_output(emacs_env *env, emacs_value buffer);
 cl_stream_t *stream_create_synonym(cl_stream_t *target, emacs_env *env,
                                     emacs_value symbol);
 cl_stream_t *stream_create_broadcast(cl_stream_t **streams, ptrdiff_t count);
