@@ -142,6 +142,18 @@ extern emacs_value Fmake_concatenated_stream(emacs_env *env, ptrdiff_t nargs,
                                               emacs_value *args, void *data);
 extern emacs_value Fconcatenated_stream_streams(emacs_env *env, ptrdiff_t nargs,
                                                  emacs_value *args, void *data);
+extern emacs_value Fmake_two_way_stream(emacs_env *env, ptrdiff_t nargs,
+                                         emacs_value *args, void *data);
+extern emacs_value Ftwo_way_stream_input_stream(emacs_env *env, ptrdiff_t nargs,
+                                                 emacs_value *args, void *data);
+extern emacs_value Ftwo_way_stream_output_stream(emacs_env *env, ptrdiff_t nargs,
+                                                  emacs_value *args, void *data);
+extern emacs_value Fmake_echo_stream(emacs_env *env, ptrdiff_t nargs,
+                                      emacs_value *args, void *data);
+extern emacs_value Fecho_stream_input_stream(emacs_env *env, ptrdiff_t nargs,
+                                              emacs_value *args, void *data);
+extern emacs_value Fecho_stream_output_stream(emacs_env *env, ptrdiff_t nargs,
+                                               emacs_value *args, void *data);
 
 /* ── module entry point ───────────────────────────────────────────────── */
 
@@ -412,7 +424,39 @@ int emacs_module_init(struct emacs_runtime *runtime) {
 
   defun(env, "cl-concatenated-stream-streams", Fconcatenated_stream_streams, 1, 1,
         "Return the streams composing a concatenated stream.\n"
+        "Convenience alias for `cl-make-concatenated-stream'.\n"
         "\n(fn CONCATENATED-STREAM)", NULL);
+
+  defun(env, "cl-make-two-way-stream", Fmake_two_way_stream, 2, 2,
+        "Return a bidirectional stream combining INPUT and OUTPUT.\n"
+        "\n"
+        "Read/listen operations are forwarded to INPUT-STREAM.\n"
+        "Write/flush operations are forwarded to OUTPUT-STREAM.\n"
+        "\n(fn INPUT-STREAM OUTPUT-STREAM)", NULL);
+
+  defun(env, "cl-two-way-stream-input-stream", Ftwo_way_stream_input_stream, 1, 1,
+        "Return the input stream of a two-way stream.\n"
+        "\n(fn TWO-WAY-STREAM)", NULL);
+
+  defun(env, "cl-two-way-stream-output-stream", Ftwo_way_stream_output_stream, 1, 1,
+        "Return the output stream of a two-way stream.\n"
+        "\n(fn TWO-WAY-STREAM)", NULL);
+
+  defun(env, "cl-make-echo-stream", Fmake_echo_stream, 2, 2,
+        "Return a bidirectional stream that echoes input to output.\n"
+        "\n"
+        "Characters read from the echo stream are read from\n"
+        "INPUT-STREAM and also written to OUTPUT-STREAM.\n"
+        "Write operations are forwarded to OUTPUT-STREAM.\n"
+        "\n(fn INPUT-STREAM OUTPUT-STREAM)", NULL);
+
+  defun(env, "cl-echo-stream-input-stream", Fecho_stream_input_stream, 1, 1,
+        "Return the input stream of an echo stream.\n"
+        "\n(fn ECHO-STREAM)", NULL);
+
+  defun(env, "cl-echo-stream-output-stream", Fecho_stream_output_stream, 1, 1,
+        "Return the output stream of an echo stream.\n"
+        "\n(fn ECHO-STREAM)", NULL);
 
   /* ── predicates ──────────────────────────────────────────────────── */
   defun(env, "cl-streamp", Fstreamp, 1, 1,

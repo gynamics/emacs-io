@@ -944,7 +944,37 @@
     (cl-close s1)
     (cl-close s2)))
 
-;; ── Buffer Input Stream ─────────────────────────────────────────────────
+(ert-deftest emacs-io-test-two-way-stream ()
+  "Test cl-make-two-way-stream."
+  (let ((sin  (cl-make-string-input-stream "hello"))
+        (sout (cl-make-string-output-stream)))
+    (let ((tw (cl-make-two-way-stream sin sout)))
+      (should (cl-input-stream-p tw))
+      (should (cl-output-stream-p tw))
+      (should (equal (cl-read-char tw) ?h))
+      (cl-write-string "world" tw)
+      (cl-close tw))
+    (should (equal (cl-get-output-stream-string sout) "world"))
+    (cl-close sin) (cl-close sout)))
+
+(ert-deftest emacs-io-test-echo-stream ()
+  "Test cl-make-echo-stream echoes input to output."
+  (let ((sin  (cl-make-string-input-stream "abc"))
+        (sout (cl-make-string-output-stream)))
+    (let ((ec (cl-make-echo-stream sin sout)))
+      (should (equal (cl-read-char ec) ?a))
+      (should (equal (cl-read-char ec) ?b))
+      (should (equal (cl-read-char ec) ?c))
+      (cl-close ec))
+    (should (equal (cl-get-output-stream-string sout) "abc"))
+    (cl-close sin) (cl-close sout)))
+
+(ert-deftest emacs-io-test-read-char-no-hang ()
+  "Test cl-read-char-no-hang returns nil when no data available."
+  (emacs-io-test--with-string-input ""
+    (should (eq (cl-read-char-no-hang stream) nil)))
+  (emacs-io-test--with-string-input "x"
+    (should (equal (cl-read-char-no-hang stream) ?x))))
 
 (ert-deftest emacs-io-test-buffer-input-stream-read-char ()
   "Test reading characters from a buffer input stream."

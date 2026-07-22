@@ -149,6 +149,8 @@ cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
 cl_stream_t *stream_create_synonym(cl_stream_t *target);
 cl_stream_t *stream_create_broadcast(cl_stream_t **streams, ptrdiff_t count);
 cl_stream_t *stream_create_concatenated(cl_stream_t **streams, ptrdiff_t count);
+cl_stream_t *stream_create_twoway(cl_stream_t *input, cl_stream_t *output);
+cl_stream_t *stream_create_echo(cl_stream_t *input, cl_stream_t *output);
 
 ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n);
 ptrdiff_t stream_write(cl_stream_t *s, const void *buf, ptrdiff_t n);

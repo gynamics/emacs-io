@@ -352,3 +352,224 @@ emacs_value Fconcatenated_stream_streams(emacs_env *env, ptrdiff_t nargs,
   }
   return lst;
 }
+
+/* ── two-way stream ──────────────────────────────────────────────────── */
+
+typedef struct {
+  cl_stream_t *input;
+  cl_stream_t *output;
+} twoway_impl_t;
+
+static ptrdiff_t tw_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
+  cl_stream_t *in = ((twoway_impl_t *)s->impl)->input;
+  if (!in || !stream_is_open(in)) return 0;
+  return stream_read(in, buf, n);
+}
+static ptrdiff_t tw_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
+  cl_stream_t *out = ((twoway_impl_t *)s->impl)->output;
+  if (!out || !stream_is_open(out)) return 0;
+  return stream_write(out, buf, n);
+}
+static bool tw_listen(cl_stream_t *s) {
+  cl_stream_t *in = ((twoway_impl_t *)s->impl)->input;
+  return in && stream_listen(in);
+}
+static int tw_close(cl_stream_t *s) {
+  twoway_impl_t *tw = (twoway_impl_t *)s->impl;
+  if (tw->input)  stream_close(tw->input);
+  if (tw->output) stream_close(tw->output);
+  atomic_store(&s->open, false);
+  return 0;
+}
+static void tw_destroy(cl_stream_t *s) {
+  free(s->impl);
+}
+static int tw_flush(cl_stream_t *s) {
+  cl_stream_t *out = ((twoway_impl_t *)s->impl)->output;
+  return out ? stream_flush(out) : 0;
+}
+static int tw_finish(cl_stream_t *s) {
+  cl_stream_t *out = ((twoway_impl_t *)s->impl)->output;
+  return out ? stream_finish(out) : 0;
+}
+static void tw_clear_output(cl_stream_t *s) {
+  cl_stream_t *out = ((twoway_impl_t *)s->impl)->output;
+  if (out && out->ops && out->ops->clear_output)
+    out->ops->clear_output(out);
+}
+static void tw_clear_input(cl_stream_t *s) {
+  cl_stream_t *in = ((twoway_impl_t *)s->impl)->input;
+  if (in && in->ops && in->ops->clear_input)
+    in->ops->clear_input(in);
+}
+static ptrdiff_t tw_write_string(emacs_env *env, cl_stream_t *s, emacs_value str) {
+  cl_stream_t *out = ((twoway_impl_t *)s->impl)->output;
+  if (!out || !stream_is_open(out)) return 0;
+  return stream_write_string(env, out, str);
+}
+
+static const cl_stream_ops_t twoway_stream_ops = {
+  .read    = tw_read,   .write   = tw_write,
+  .listen  = tw_listen, .close   = tw_close,
+  .destroy = tw_destroy,
+  .flush   = tw_flush,  .finish  = tw_finish,
+  .clear_output = tw_clear_output, .clear_input = tw_clear_input,
+  .write_string  = tw_write_string,
+};
+
+/* ── echo stream ─────────────────────────────────────────────────────── */
+
+typedef struct {
+  cl_stream_t *input;
+  cl_stream_t *output;
+} echo_impl_t;
+
+static ptrdiff_t echo_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
+  echo_impl_t *ec = (echo_impl_t *)s->impl;
+  if (!ec->input || !stream_is_open(ec->input)) return 0;
+  ptrdiff_t r = stream_read(ec->input, buf, n);
+  if (r > 0 && ec->output && stream_is_open(ec->output))
+    stream_write(ec->output, buf, r);
+  return r;
+}
+static ptrdiff_t echo_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
+  cl_stream_t *out = ((echo_impl_t *)s->impl)->output;
+  if (!out || !stream_is_open(out)) return 0;
+  return stream_write(out, buf, n);
+}
+static bool echo_listen(cl_stream_t *s) {
+  cl_stream_t *in = ((echo_impl_t *)s->impl)->input;
+  return in && stream_listen(in);
+}
+static int echo_close(cl_stream_t *s) {
+  echo_impl_t *ec = (echo_impl_t *)s->impl;
+  if (ec->input)  stream_close(ec->input);
+  if (ec->output) stream_close(ec->output);
+  atomic_store(&s->open, false);
+  return 0;
+}
+static void echo_destroy(cl_stream_t *s) { free(s->impl); }
+static int echo_flush(cl_stream_t *s) {
+  cl_stream_t *out = ((echo_impl_t *)s->impl)->output;
+  return out ? stream_flush(out) : 0;
+}
+static void echo_clear_output(cl_stream_t *s) {
+  cl_stream_t *out = ((echo_impl_t *)s->impl)->output;
+  if (out && out->ops && out->ops->clear_output)
+    out->ops->clear_output(out);
+}
+static void echo_clear_input(cl_stream_t *s) {
+  cl_stream_t *in = ((echo_impl_t *)s->impl)->input;
+  if (in && in->ops && in->ops->clear_input)
+    in->ops->clear_input(in);
+}
+static ptrdiff_t echo_write_string(emacs_env *env, cl_stream_t *s, emacs_value str) {
+  cl_stream_t *out = ((echo_impl_t *)s->impl)->output;
+  if (!out || !stream_is_open(out)) return 0;
+  return stream_write_string(env, out, str);
+}
+
+static const cl_stream_ops_t echo_stream_ops = {
+  .read    = echo_read,  .write   = echo_write,
+  .listen  = echo_listen,.close   = echo_close,
+  .destroy = echo_destroy,
+  .flush   = echo_flush,
+  .clear_output = echo_clear_output, .clear_input = echo_clear_input,
+  .write_string  = echo_write_string,
+};
+
+/* ── constructors ────────────────────────────────────────────────────── */
+
+cl_stream_t *stream_create_twoway(cl_stream_t *input, cl_stream_t *output) {
+  twoway_impl_t *tw = calloc(1, sizeof(*tw));
+  if (!tw) return NULL;
+  tw->input = input; tw->output = output;
+  cl_stream_t *s = calloc(1, sizeof(*s));
+  if (!s) { free(tw); return NULL; }
+  s->ops = &twoway_stream_ops; s->impl = tw;
+  s->flags = CL_STREAM_FLAG_INPUT | CL_STREAM_FLAG_OUTPUT;
+  atomic_init(&s->open, true);
+  pthread_mutex_init(&s->mutex, NULL);
+  return s;
+}
+
+cl_stream_t *stream_create_echo(cl_stream_t *input, cl_stream_t *output) {
+  echo_impl_t *ec = calloc(1, sizeof(*ec));
+  if (!ec) return NULL;
+  ec->input = input; ec->output = output;
+  cl_stream_t *s = calloc(1, sizeof(*s));
+  if (!s) { free(ec); return NULL; }
+  s->ops = &echo_stream_ops; s->impl = ec;
+  s->flags = CL_STREAM_FLAG_INPUT | CL_STREAM_FLAG_OUTPUT;
+  atomic_init(&s->open, true);
+  pthread_mutex_init(&s->mutex, NULL);
+  return s;
+}
+
+/* ── Lisp wrappers ────────────────────────────────────────────────────── */
+
+emacs_value Fmake_two_way_stream(emacs_env *env, ptrdiff_t nargs,
+                                  emacs_value *args, void *data) {
+  (void)data;
+  if (nargs < 2) {
+    signal_error(env, "cl-make-two-way-stream requires 2 arguments");
+    return syms.v_nil;
+  }
+  cl_stream_t *in  = euser_ptr_stream_get(env, args[0]);
+  cl_stream_t *out = euser_ptr_stream_get(env, args[1]);
+  if (!in || !out) { signal_error(env, "Invalid stream"); return syms.v_nil; }
+  cl_stream_t *s = stream_create_twoway(in, out);
+  if (!s) { signal_error(env, "Cannot create two-way stream"); return syms.v_nil; }
+  return euser_ptr_stream_make(env, s);
+}
+
+emacs_value Ftwo_way_stream_input_stream(emacs_env *env, ptrdiff_t nargs,
+                                          emacs_value *args, void *data) {
+  (void)data; (void)nargs;
+  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
+  if (!s || s->ops != &twoway_stream_ops)
+    { signal_error(env, "Not a two-way stream"); return syms.v_nil; }
+  return euser_ptr_stream_make(env, ((twoway_impl_t *)s->impl)->input);
+}
+
+emacs_value Ftwo_way_stream_output_stream(emacs_env *env, ptrdiff_t nargs,
+                                           emacs_value *args, void *data) {
+  (void)data; (void)nargs;
+  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
+  if (!s || s->ops != &twoway_stream_ops)
+    { signal_error(env, "Not a two-way stream"); return syms.v_nil; }
+  return euser_ptr_stream_make(env, ((twoway_impl_t *)s->impl)->output);
+}
+
+emacs_value Fmake_echo_stream(emacs_env *env, ptrdiff_t nargs,
+                               emacs_value *args, void *data) {
+  (void)data;
+  if (nargs < 2) {
+    signal_error(env, "cl-make-echo-stream requires 2 arguments");
+    return syms.v_nil;
+  }
+  cl_stream_t *in  = euser_ptr_stream_get(env, args[0]);
+  cl_stream_t *out = euser_ptr_stream_get(env, args[1]);
+  if (!in || !out) { signal_error(env, "Invalid stream"); return syms.v_nil; }
+  cl_stream_t *s = stream_create_echo(in, out);
+  if (!s) { signal_error(env, "Cannot create echo stream"); return syms.v_nil; }
+  return euser_ptr_stream_make(env, s);
+}
+
+emacs_value Fecho_stream_input_stream(emacs_env *env, ptrdiff_t nargs,
+                                       emacs_value *args, void *data) {
+  (void)data; (void)nargs;
+  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
+  if (!s || s->ops != &echo_stream_ops)
+    { signal_error(env, "Not an echo stream"); return syms.v_nil; }
+  return euser_ptr_stream_make(env, ((echo_impl_t *)s->impl)->input);
+}
+
+emacs_value Fecho_stream_output_stream(emacs_env *env, ptrdiff_t nargs,
+                                        emacs_value *args, void *data) {
+  (void)data; (void)nargs;
+  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
+  if (!s || s->ops != &echo_stream_ops)
+    { signal_error(env, "Not an echo stream"); return syms.v_nil; }
+  return euser_ptr_stream_make(env, ((echo_impl_t *)s->impl)->output);
+}
