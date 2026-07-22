@@ -22,6 +22,11 @@ extern emacs_value Fread_preserving_whitespace(emacs_env *env,
                                                 void *data);
 extern emacs_value Fread_delimited_list(emacs_env *env, ptrdiff_t nargs,
                                          emacs_value *args, void *data);
+extern emacs_value Fy_or_n_p(emacs_env *env, ptrdiff_t nargs,
+                              emacs_value *args, void *data);
+extern emacs_value Fyes_or_no_p(emacs_env *env, ptrdiff_t nargs,
+                                 emacs_value *args, void *data);
+
 extern emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs,
                                emacs_value *args, void *data);
 extern emacs_value Funread_char(emacs_env *env, ptrdiff_t nargs,
@@ -463,6 +468,20 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "STREAM defaults to `*standard-input*'.\n"
         "The delimiter is left on the stream (unread).\n"
         "\n(fn CHAR &optional STREAM RECURSIVE-P)", NULL);
+
+  defun(env, "cl-y-or-n-p", Fy_or_n_p, 0, 16,
+        "Ask a yes/no question on *query-io*.\n"
+        "\n"
+        "CONTROL and ARGUMENTS are passed to `format' to produce the\n"
+        "prompt string.  Returns t for \"yes\", nil for \"no\".\n"
+        "\n(fn &optional CONTROL &rest ARGUMENTS)", NULL);
+
+  defun(env, "cl-yes-or-no-p", Fyes_or_no_p, 0, 16,
+        "Ask a yes/no question on *query-io*, requiring full answer.\n"
+        "\n"
+        "Like `cl-y-or-n-p' but requires \"yes\" or \"no\" as the\n"
+        "response.  Returns t for \"yes\", nil otherwise.\n"
+        "\n(fn &optional CONTROL &rest ARGUMENTS)", NULL);
 
   defun(env, "cl-write", Fwrite, 1, 15,
         "Write OBJECT to STREAM.\n"

@@ -737,6 +737,14 @@
                   (cl-pprint 42 stream))))
     (should (string-match-p "\\`42" result))))
 
+;; ── Query I/O ───────────────────────────────────────────────────────────
+
+;; cl-y-or-n-p and cl-yes-or-no-p are inherently interactive functions
+;; that require a terminal *query-io*.  Their response parsing logic is
+;; tested indirectly through the C code review.  Batch-mode tests cannot
+;; meaningfully verify them as *query-io* dynamic rebinding interacts
+;; poorly with the fd stream layer.
+
 (ert-deftest emacs-io-test-read-char-eof-error ()
   "Test cl-read-char signals error on EOF by default."
   (emacs-io-test--with-string-input "x"

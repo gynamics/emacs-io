@@ -442,3 +442,119 @@ emacs_value Fread_delimited_list(emacs_env *env, ptrdiff_t nargs,
   emacs_value result = efuncall(env, "reverse", 1, rev_args);
   return result;
 }
+
+/* ── cl-y-or-n-p ─────────────────────────────────────────────────────
+   (cl-y-or-n-p &optional control &rest arguments)
+   Ask a yes/no question using *query-io*.  Returns t for yes, nil for no. */
+
+emacs_value Fy_or_n_p(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                       void *data) {
+  (void)data;
+
+  /* get *query-io* stream directly (not from args) */
+  emacs_value qio = efuncall_cached(env, syms.fn_symbol_value, 1,
+                     (emacs_value[]){ eintern(env, "*query-io*") });
+  cl_stream_t *s = euser_ptr_stream_get(env, qio);
+  if (!s || !stream_is_open(s)) {
+    signal_error(env, "y-or-n-p: *query-io* is not an open stream");
+    return syms.v_nil;
+  }
+
+  /* format prompt if control string provided */
+  if (nargs >= 1 && env->is_not_nil(env, args[0])) {
+    emacs_value fmt_args[16];
+    fmt_args[0] = args[0];
+    for (ptrdiff_t i = 1; i < nargs && i < 16; i++)
+      fmt_args[i] = args[i];
+
+    emacs_value prompt = env->funcall(env, eintern(env, "format"),
+                                       (nargs < 16 ? nargs : 16), fmt_args);
+    stream_write_string(env, s, prompt);
+    stream_write_string(env, s, estring(env, " (y/n) "));
+  }
+
+  /* read response line */
+  strbuf_t *sb = strbuf_create(128);
+  if (!sb) return syms.v_nil;
+
+  for (;;) {
+    unsigned char ch;
+    ptrdiff_t r = stream_read(s, &ch, 1);
+    if (r <= 0) break;
+    if (ch == '\n' || ch == '\r') break;
+    strbuf_append(sb, (const char *)&ch, 1);
+  }
+
+  emacs_value resp = strbuf_to_estring(env, sb);
+  strbuf_free(sb);
+
+  /* check response */
+  ptrdiff_t rlen = 0;
+  char *rstr = estring_alloc(env, resp, &rlen);
+  if (!rstr) return syms.v_nil;
+
+  bool result = false;
+  if (rlen > 0 && (rstr[0] == 'y' || rstr[0] == 'Y'))
+    result = true;
+  free(rstr);
+
+  return result ? syms.v_t : syms.v_nil;
+}
+
+/* ── cl-yes-or-no-p ──────────────────────────────────────────────────
+   (cl-yes-or-no-p &optional control &rest arguments)
+   Ask a yes/no question using *query-io*.  Requires full \"yes\"/\"no\". */
+
+emacs_value Fyes_or_no_p(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                          void *data) {
+  (void)data;
+
+  emacs_value qio = efuncall_cached(env, syms.fn_symbol_value, 1,
+                     (emacs_value[]){ eintern(env, "*query-io*") });
+  cl_stream_t *s = euser_ptr_stream_get(env, qio);
+  if (!s || !stream_is_open(s)) {
+    signal_error(env, "yes-or-no-p: *query-io* is not an open stream");
+    return syms.v_nil;
+  }
+
+  /* format prompt if control string provided */
+  if (nargs >= 1 && env->is_not_nil(env, args[0])) {
+    emacs_value fmt_args[16];
+    fmt_args[0] = args[0];
+    for (ptrdiff_t i = 1; i < nargs && i < 16; i++)
+      fmt_args[i] = args[i];
+
+    emacs_value prompt = env->funcall(env, eintern(env, "format"),
+                                       (nargs < 16 ? nargs : 16), fmt_args);
+    stream_write_string(env, s, prompt);
+    stream_write_string(env, s, estring(env, " (yes/no) "));
+  }
+
+  /* read response line */
+  strbuf_t *sb = strbuf_create(128);
+  if (!sb) return syms.v_nil;
+
+  for (;;) {
+    unsigned char ch;
+    ptrdiff_t r = stream_read(s, &ch, 1);
+    if (r <= 0) break;
+    if (ch == '\n' || ch == '\r') break;
+    strbuf_append(sb, (const char *)&ch, 1);
+  }
+
+  emacs_value resp = strbuf_to_estring(env, sb);
+  strbuf_free(sb);
+
+  ptrdiff_t rlen = 0;
+  char *rstr = estring_alloc(env, resp, &rlen);
+  if (!rstr) return syms.v_nil;
+
+  bool result = false;
+  if (rlen >= 3 && (rstr[0] == 'y' || rstr[0] == 'Y') &&
+      (rstr[1] == 'e' || rstr[1] == 'E') &&
+      (rstr[2] == 's' || rstr[2] == 'S'))
+    result = true;
+  free(rstr);
+
+  return result ? syms.v_t : syms.v_nil;
+}
