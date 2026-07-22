@@ -1,9 +1,11 @@
-# emacs-io
+# emacs-io — CL-Style Stream I/O for GNU Emacs
 
-CL-style stream I/O as a dynamic module for GNU Emacs 31.
+**A native dynamic module for Emacs 31 that delivers high-performance,
+thread-safe stream I/O — bypassing buffer gap-machinery entirely.**
 
 ```elisp
 (module-load "emacs-io.so")
+(require 'emacs-io-macros)  ;; cl-with-open-file, cl-with-open-stream
 ```
 
 ## Why
@@ -18,11 +20,25 @@ ring buffers, zero copy within string streams, and no hook machinery.
 
 ## Quick start
 
+```bash
+make                  # → emacs-io.so
+make verify           # confirm module loads in Emacs
+make test             # 128 unit tests
+make bench            # 12 performance benchmarks
 ```
-$ make             # → emacs-io.so
-$ make verify      # confirm module loads in Emacs
-$ make test        # 128 unit tests
-$ make bench       # 12 performance benchmarks
+
+Load the module and companion Lisp macros:
+
+```elisp
+(module-load "emacs-io.so")
+(load "emacs-io-macros.el")   ;; provides cl-with-open-file, cl-with-open-stream
+```
+
+Or with `require` after adding to `load-path`:
+
+```elisp
+(add-to-list 'load-path "/path/to/emacs-io/src")
+(require 'emacs-io-macros)
 ```
 
 `EMACS_IO_BENCH_FULL=1 make bench` enables the 10 MB-scale tests.
