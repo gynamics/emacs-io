@@ -1075,5 +1075,21 @@
       (should (equal (buffer-string) "XY")))
     (kill-buffer buf)))
 
+(ert-deftest emacs-io-test-buffer-io-stream ()
+  "Test cl-make-buffer-io-stream read and write."
+  (let ((buf (generate-new-buffer " *bio-test*")))
+    (with-current-buffer buf (insert "ABC"))
+    (let ((s (cl-make-buffer-io-stream buf)))
+      ;; read from snapshot
+      (should (equal (cl-read-char s) ?A))
+      (should (equal (cl-read-char s) ?B))
+      ;; write past the read position
+      (cl-write-string "XX" s)
+      (cl-close s))
+    ;; output stream flushed on close via Fclose
+    (with-current-buffer buf
+      (should (equal (buffer-string) "ABCXX")))
+    (kill-buffer buf)))
+
 (provide 'emacs-io-test)
 ;;; emacs-io-test.el ends here

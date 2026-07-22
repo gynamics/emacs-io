@@ -89,6 +89,8 @@ extern emacs_value Fmake_buffer_input_stream(emacs_env *env, ptrdiff_t nargs,
                                                emacs_value *args, void *data);
 extern emacs_value Fmake_buffer_output_stream(emacs_env *env, ptrdiff_t nargs,
                                                emacs_value *args, void *data);
+extern emacs_value Fmake_buffer_io_stream(emacs_env *env, ptrdiff_t nargs,
+                                           emacs_value *args, void *data);
 extern emacs_value Ffile_regular_p(emacs_env *env, ptrdiff_t nargs,
                                     emacs_value *args, void *data);
 extern emacs_value Ffile_tty_p(emacs_env *env, ptrdiff_t nargs,
@@ -410,6 +412,15 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "on the next string write.\n"
         "\n(fn BUFFER)", NULL);
   /* ── compound streams ─────────────────────────────────────────────── */
+  defun(env, "cl-make-buffer-io-stream", Fmake_buffer_io_stream, 1, 5,
+        "Return a bidirectional stream reading from and writing to BUFFER.\n"
+        "\n"
+        "Reads operate on a snapshot taken at creation time.\n"
+        "Writes accumulate and are inserted into BUFFER on close\n"
+        "or on each string-write.  Keywords :START and :END delimit\n"
+        "the initial read region.\n"
+        "\n(fn BUFFER &key START END)", NULL);
+
   defun(env, "cl-make-synonym-stream", Fmake_synonym_stream, 1, 1,
         "Return a stream that redirects I/O to SYMBOL's value.\n"
         "\n"

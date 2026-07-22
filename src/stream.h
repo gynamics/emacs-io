@@ -150,10 +150,13 @@ cl_stream_t *stream_create_string_output(size_t hint_size);
 cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
                                         ptrdiff_t start, ptrdiff_t end);
 cl_stream_t *stream_create_buffer_output(emacs_env *env, emacs_value buffer);
+cl_stream_t *stream_create_buffer_io(emacs_env *env, emacs_value buffer,
+                                      ptrdiff_t start, ptrdiff_t end);
 extern const cl_stream_ops_t buffer_output_ops;
+void bos_flush_pending(emacs_env *env, cl_stream_t *s);
+extern const cl_stream_ops_t buffer_io_ops;
 cl_stream_t *stream_create_synonym(cl_stream_t *target, emacs_env *env,
                                     emacs_value symbol);
-cl_stream_t *stream_create_broadcast(cl_stream_t **streams, ptrdiff_t count);
 cl_stream_t *stream_create_concatenated(cl_stream_t **streams, ptrdiff_t count);
 cl_stream_t *stream_create_twoway(cl_stream_t *input, cl_stream_t *output);
 cl_stream_t *stream_create_echo(cl_stream_t *input, cl_stream_t *output);

@@ -173,10 +173,18 @@ emacs_value Fclose(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     return syms.v_nil;
   }
 
-  /* flush pending buffer-output-stream content before close */
+  /* flush pending buffer-stream content before close */
   extern void bos_flush_pending(emacs_env *env, cl_stream_t *s);
-  if (s->ops == &buffer_output_ops)
-    bos_flush_pending(env, s);
+  extern const cl_stream_ops_t buffer_output_ops;
+  extern const cl_stream_ops_t buffer_io_ops;
+  if (s->ops == &buffer_output_ops || s->ops == &buffer_io_ops) {
+    /* for buffer_io, flush the internal strbuf via a dedicated wrapper */
+    extern void bds_flush_pending(emacs_env *env, cl_stream_t *s);
+    if (s->ops == &buffer_io_ops)
+      bds_flush_pending(env, s);
+    else
+      bos_flush_pending(env, s);
+  }
 
   /* :abort — discard output without flushing */
   for (ptrdiff_t i = 1; i < nargs - 1; i += 2) {
