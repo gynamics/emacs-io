@@ -144,6 +144,9 @@ cl_stream_t *stream_create_string_input(const char *data, size_t len);
 cl_stream_t *stream_create_string_output(size_t hint_size);
 cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
                                         ptrdiff_t start, ptrdiff_t end);
+cl_stream_t *stream_create_synonym(const char *symbol_name);
+cl_stream_t *stream_create_broadcast(cl_stream_t **streams, ptrdiff_t count);
+cl_stream_t *stream_create_concatenated(cl_stream_t **streams, ptrdiff_t count);
 
 ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n);
 ptrdiff_t stream_write(cl_stream_t *s, const void *buf, ptrdiff_t n);

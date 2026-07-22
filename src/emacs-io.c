@@ -99,6 +99,8 @@ extern emacs_value Ffile_position(emacs_env *env, ptrdiff_t nargs,
 
   extern emacs_value Fstream_external_format(emacs_env *env, ptrdiff_t nargs,
                                             emacs_value *args, void *data);
+extern emacs_value Ffile_string_length(emacs_env *env, ptrdiff_t nargs,
+                                        emacs_value *args, void *data);
 extern emacs_value Finteractive_stream_p(emacs_env *env, ptrdiff_t nargs,
                                           emacs_value *args, void *data);
 
@@ -126,6 +128,20 @@ extern emacs_value Fpprint(emacs_env *env, ptrdiff_t nargs,
 
 /* stdstream.c */
 extern void init_standard_streams(emacs_env *env);
+
+/* compstream.c */
+extern emacs_value Fmake_synonym_stream(emacs_env *env, ptrdiff_t nargs,
+                                         emacs_value *args, void *data);
+extern emacs_value Fsynonym_stream_symbol(emacs_env *env, ptrdiff_t nargs,
+                                           emacs_value *args, void *data);
+extern emacs_value Fmake_broadcast_stream(emacs_env *env, ptrdiff_t nargs,
+                                           emacs_value *args, void *data);
+extern emacs_value Fbroadcast_stream_streams(emacs_env *env, ptrdiff_t nargs,
+                                              emacs_value *args, void *data);
+extern emacs_value Fmake_concatenated_stream(emacs_env *env, ptrdiff_t nargs,
+                                              emacs_value *args, void *data);
+extern emacs_value Fconcatenated_stream_streams(emacs_env *env, ptrdiff_t nargs,
+                                                 emacs_value *args, void *data);
 
 /* ── module entry point ───────────────────────────────────────────────── */
 
@@ -371,6 +387,33 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "The stream reads buffer text in 64 KB chunks for efficiency.\n"
         "\n(fn BUFFER &key START END)", NULL);
 
+  /* ── compound streams ─────────────────────────────────────────────── */
+  defun(env, "cl-make-synonym-stream", Fmake_synonym_stream, 1, 1,
+        "Return a stream that redirects I/O to SYMBOL's value.\n"
+        "\n"
+        "SYMBOL is a symbol whose dynamic value should be a stream.\n"
+        "\n(fn SYMBOL)", NULL);
+
+  defun(env, "cl-synonym-stream-symbol", Fsynonym_stream_symbol, 1, 1,
+        "Return the symbol used by a synonym stream.\n"
+        "\n(fn SYNONYM-STREAM)", NULL);
+
+  defun(env, "cl-make-broadcast-stream", Fmake_broadcast_stream, 0, 16,
+        "Return an output stream broadcasting to all given streams.\n"
+        "\n(fn &rest STREAMS)", NULL);
+
+  defun(env, "cl-broadcast-stream-streams", Fbroadcast_stream_streams, 1, 1,
+        "Return the streams composing a broadcast stream.\n"
+        "\n(fn BROADCAST-STREAM)", NULL);
+
+  defun(env, "cl-make-concatenated-stream", Fmake_concatenated_stream, 0, 16,
+        "Return an input stream reading from streams in sequence.\n"
+        "\n(fn &rest STREAMS)", NULL);
+
+  defun(env, "cl-concatenated-stream-streams", Fconcatenated_stream_streams, 1, 1,
+        "Return the streams composing a concatenated stream.\n"
+        "\n(fn CONCATENATED-STREAM)", NULL);
+
   /* ── predicates ──────────────────────────────────────────────────── */
   defun(env, "cl-streamp", Fstreamp, 1, 1,
         "Return t if OBJECT is a stream (open or closed).\n"
@@ -433,6 +476,13 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "Returns a non-negative integer if the stream supports length\n"
         "queries, or nil if the length cannot be determined.\n"
         "\n(fn STREAM)", NULL);
+
+  defun(env, "cl-file-string-length", Ffile_string_length, 2, 2,
+        "Return the byte count of OBJECT's printed representation.\n"
+        "\n"
+        "Returns the number of bytes that writing OBJECT to STREAM\n"
+        "would add to the file position.\n"
+        "\n(fn STREAM OBJECT)", NULL);
 
   /* ── Lisp reader / printer ───────────────────────────────────────── */
   defun(env, "cl-read", Fread, 0, 4,

@@ -742,8 +742,7 @@
 ;; cl-y-or-n-p and cl-yes-or-no-p are inherently interactive functions
 ;; that require a terminal *query-io*.  Their response parsing logic is
 ;; tested indirectly through the C code review.  Batch-mode tests cannot
-;; meaningfully verify them as *query-io* dynamic rebinding interacts
-;; poorly with the fd stream layer.
+;; meaningfully verify them."
 
 (ert-deftest emacs-io-test-read-char-eof-error ()
   "Test cl-read-char signals error on EOF by default."
@@ -892,6 +891,33 @@
     (cl-write-string "world" s)
     (should (equal (cl-file-length s) 10))
     (cl-close s)))
+
+;; ── Compound Streams ────────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-broadcast-stream ()
+  "Test cl-make-broadcast-stream."
+  (let ((s1 (cl-make-string-output-stream))
+        (s2 (cl-make-string-output-stream)))
+    (let ((bc (cl-make-broadcast-stream s1 s2)))
+      (cl-write-string "hi" bc)
+      (cl-close bc))
+    (should (equal (cl-get-output-stream-string s1) "hi"))
+    (should (equal (cl-get-output-stream-string s2) "hi"))
+    (cl-close s1)
+    (cl-close s2)))
+
+(ert-deftest emacs-io-test-concatenated-stream ()
+  "Test cl-make-concatenated-stream."
+  (let ((s1 (cl-make-string-input-stream "ab"))
+        (s2 (cl-make-string-input-stream "cd")))
+    (let ((cc (cl-make-concatenated-stream s1 s2)))
+      (should (equal (cl-read-char cc) ?a))
+      (should (equal (cl-read-char cc) ?b))
+      (should (equal (cl-read-char cc) ?c))
+      (should (equal (cl-read-char cc) ?d))
+      (cl-close cc))
+    (cl-close s1)
+    (cl-close s2)))
 
 ;; ── Buffer Input Stream ─────────────────────────────────────────────────
 

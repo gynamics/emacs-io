@@ -10,7 +10,7 @@ TARGET   = emacs-io.so
 OBJS     = $(SRC)/emacs-io.o $(SRC)/util.o $(SRC)/stream.o $(SRC)/fdstream.o \
            $(SRC)/strstream.o $(SRC)/mmapstream.o $(SRC)/bufstream.o \
            $(SRC)/stdstream.o $(SRC)/reader.o $(SRC)/printer.o \
-           $(SRC)/fileio.o $(SRC)/lispio.o
+           $(SRC)/fileio.o $(SRC)/lispio.o $(SRC)/compstream.o
 TEST     = $(TST)/emacs-io-test.el
 BENCH    = bench/emacs-io-perf-test.el
 

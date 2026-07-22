@@ -412,27 +412,31 @@ emacs_value Fprinc_to_string(emacs_env *env, ptrdiff_t nargs,
 emacs_value Fwrite_to_string(emacs_env *env, ptrdiff_t nargs,
                               emacs_value *args, void *data) {
   (void)data;
-  /* (cl-write-to-string object &rest args) — delegates to cl-write
-     with a string output stream, then returns the accumulated string */
+  /* (cl-write-to-string object &rest args) — create temp stream,
+     delegate to Fwrite with :stream inserted, return string */
   if (nargs < 1) {
     signal_error(env, "cl-write-to-string requires 1 argument");
     return syms.v_nil;
   }
 
-  /* create a temp string output stream */
   cl_stream_t *s = stream_create_string_output(0);
-  if (!s) {
-    signal_error(env, "Cannot create string stream");
-    return syms.v_nil;
-  }
+  if (!s) { signal_error(env, "Cannot create string stream"); return syms.v_nil; }
 
-  /* call prin1-to-string (respects write's print-vars via dynamic binding) */
-  emacs_value str = efuncall_cached(env, syms.fn_prin1_to_string, 1, args);
-  stream_write_string(env, s, str);
+  /* build new arg list: [object, :stream, stream-user-ptr, ...rest] */
+  emacs_value new_args[32];
+  new_args[0] = args[0];
+  new_args[1] = syms.k_stream;
+  new_args[2] = euser_ptr_stream_make(env, s);
+  ptrdiff_t k = 3;
+  for (ptrdiff_t i = 1; i < nargs && k < 30; i++, k++)
+    new_args[k] = args[i];
+
+  extern emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs,
+                             emacs_value *args, void *data);
+  Fwrite(env, k, new_args, data);
 
   emacs_value result = str_output_to_string(env, s);
-  stream_close(s);
-  stream_free(s);
+  /* stream lifetime managed by user-ptr finalizer — do not free here */
   return result;
 }
 
