@@ -27,43 +27,49 @@ static const cl_stream_ops_t buffer_input_ops = {
 };
 
 typedef struct {
-  emacs_value buffer_ref;
-  ptrdiff_t   pos;
-  ptrdiff_t   end;
-  char       *chunk;
-  size_t      chunk_size;
-  size_t      chunk_pos;
-  size_t      chunk_len;
+  char       *data;
+  size_t      len;
+  size_t      pos;
 } buffer_input_full_t;
 
 cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
                                         ptrdiff_t start, ptrdiff_t end) {
-  buffer_input_full_t *bi = calloc(1, sizeof(*bi));
-  if (!bi) return NULL;
+  (void)buffer;
+  emacs_value args[2];
+  args[0] = eint(env, start);
+  args[1] = eint(env, end);
+  emacs_value text = efuncall_cached(env, syms.fn_buffer_substring, 2, args);
 
-  bi->buffer_ref = env->make_global_ref(env, buffer);
-  bi->pos = start;
-  bi->end = end;
-  bi->chunk_size = BUFFER_STREAM_CHUNK;
-  bi->chunk = malloc(bi->chunk_size);
-  if (!bi->chunk) {
-    env->free_global_ref(env, bi->buffer_ref);
-    free(bi);
+  ptrdiff_t slen = 0;
+  if (!env->copy_string_contents(env, text, NULL, &slen)) return NULL;
+  if (slen <= 0) return NULL;
+
+  char *data = malloc((size_t)slen);
+  if (!data) return NULL;
+  ptrdiff_t copied = slen;
+  if (!env->copy_string_contents(env, text, data, &copied)) {
+    free(data);
     return NULL;
   }
-  bi->chunk_pos = 0;
-  bi->chunk_len = 0;
+  copied -= 1;   /* exclude null terminator */
+
+  buffer_input_full_t *bi = calloc(1, sizeof(*bi));
+  if (!bi) { free(data); return NULL; }
+
+  bi->data = data;
+  bi->len = (size_t)copied;
+  bi->pos = 0;
 
   cl_stream_t *s = calloc(1, sizeof(*s));
   if (!s) {
-    env->free_global_ref(env, bi->buffer_ref);
-    free(bi->chunk);
+    free(bi->data);
     free(bi);
     return NULL;
   }
 
   s->ops = &buffer_input_ops;
   s->impl = bi;
+  s->kind = CL_STREAM_KIND_BUFFER_INPUT;
   s->flags = CL_STREAM_FLAG_INPUT;
   atomic_init(&s->open, true);
   pthread_mutex_init(&s->mutex, NULL);
@@ -71,58 +77,25 @@ cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
   return s;
 }
 
-static ptrdiff_t fill_chunk(buffer_input_full_t *bi) {
-  if (bi->pos >= bi->end) return 0;
-  ptrdiff_t remaining = bi->end - bi->pos;
-  ptrdiff_t to_read = remaining < (ptrdiff_t)bi->chunk_size
-                      ? remaining : (ptrdiff_t)bi->chunk_size;
-
-  emacs_env *env = cl_env();
-  if (!env) return 0;
-
-  emacs_value args[2];
-  args[0] = eint(env, bi->pos);
-  args[1] = eint(env, bi->pos + to_read);
-  emacs_value text = efuncall_cached(env, syms.fn_buffer_substring, 2, args);
-
-  ptrdiff_t copied = (ptrdiff_t)bi->chunk_size;
-  if (!env->copy_string_contents(env, text, bi->chunk, &copied)) return 0;
-  copied -= 1; /* exclude null terminator */
-
-  bi->pos += copied;
-  bi->chunk_len = (size_t)copied;
-  bi->chunk_pos = 0;
-  return copied;
-}
-
 static ptrdiff_t bis_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
   if (!s || !buf || n <= 0) return 0;
   buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (!bi) return 0;
+  if (!bi || bi->pos >= bi->len) return 0;
 
-  ptrdiff_t total = 0;
-  unsigned char *dest = (unsigned char *)buf;
-
-  while (total < n) {
-    if (bi->chunk_pos >= bi->chunk_len) {
-      if (fill_chunk(bi) <= 0) break;
-    }
-    size_t avail = bi->chunk_len - bi->chunk_pos;
-    size_t want = (size_t)(n - total);
-    size_t to_copy = avail < want ? avail : want;
-    memcpy(dest + total, bi->chunk + bi->chunk_pos, to_copy);
-    bi->chunk_pos += to_copy;
-    total += (ptrdiff_t)to_copy;
-  }
-  return total;
+  size_t remaining = bi->len - bi->pos;
+  size_t to_copy = (size_t)n < remaining ? (size_t)n : remaining;
+  memcpy(buf, bi->data + bi->pos, to_copy);
+  bi->pos += to_copy;
+  return (ptrdiff_t)to_copy;
 }
 
 static int bis_close(cl_stream_t *s) {
   buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
   if (bi) {
-    emacs_env *env = cl_env();
-    if (env) env->free_global_ref(env, bi->buffer_ref);
-    free(bi->chunk);
+    free(bi->data);
+    bi->data = NULL;
+    bi->len = 0;
+    bi->pos = 0;
   }
   atomic_store(&s->open, false);
   return 0;
@@ -131,17 +104,34 @@ static int bis_close(cl_stream_t *s) {
 static void bis_destroy(cl_stream_t *s) {
   buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
   if (bi) {
-    free(bi->chunk);
     free(bi);
   }
 }
 
 static bool bis_listen(cl_stream_t *s) {
   buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (!bi) return false;
-  if (bi->chunk_pos < bi->chunk_len) return true;
-  return bi->pos < bi->end;
+  return bi != NULL && bi->pos < bi->len;
 }
+
+static ptrdiff_t bis_file_position(cl_stream_t *s) {
+  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
+  if (!bi) return -1;
+  return (ptrdiff_t)bi->pos;
+}
+
+static bool bis_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
+  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
+  if (!bi || pos < 0 || (size_t)pos > bi->len) return false;
+  bi->pos = (size_t)pos;
+  return true;
+}
+
+static ptrdiff_t bis_file_length(cl_stream_t *s) {
+  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
+  if (!bi) return -1;
+  return (ptrdiff_t)bi->len;
+}
+
 /* ── cl-make-buffer-input-stream ────────────────────────────────────────
    (cl-make-buffer-input-stream buffer &key start end) */
 
@@ -155,7 +145,7 @@ emacs_value Fmake_buffer_input_stream(emacs_env *env, ptrdiff_t nargs,
 
   ptrdiff_t start = 0;
   ptrdiff_t end = eint_extract(env,
-    efuncall_cached(env, syms.fn_buffer_size, 1, (emacs_value[]){ args[0] }));
+    efuncall_cached(env, syms.fn_buffer_size, 1, &args[0]));
 
   for (ptrdiff_t i = 1; i < nargs - 1; i += 2) {
     if (kw_eq_cached(env, args[i], syms.k_start))
@@ -164,31 +154,13 @@ emacs_value Fmake_buffer_input_stream(emacs_env *env, ptrdiff_t nargs,
       end = eint_extract(env, args[i + 1]);
   }
 
+  if (start < 0) start = 0;
+  if (end < start) end = start;
+
   cl_stream_t *s = stream_create_buffer_input(env, args[0], start, end);
   if (!s) {
     signal_error(env, "Cannot create buffer input stream");
     return syms.v_nil;
   }
   return euser_ptr_stream_make(env, s);
-}
-
-static ptrdiff_t bis_file_position(cl_stream_t *s) {
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (!bi) return -1;
-  return bi->pos - (ptrdiff_t)bi->chunk_len + (ptrdiff_t)bi->chunk_pos;
-}
-
-static bool bis_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (!bi || pos < 0 || pos >= bi->end) return false;
-  bi->chunk_pos = 0;
-  bi->chunk_len = 0;
-  bi->pos = pos;
-  return true;
-}
-
-static ptrdiff_t bis_file_length(cl_stream_t *s) {
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (!bi) return -1;
-  return bi->end;
 }

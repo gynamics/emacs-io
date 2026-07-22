@@ -63,6 +63,7 @@ typedef enum {
   CL_STREAM_KIND_MMAP,
   CL_STREAM_KIND_STRING_INPUT,
   CL_STREAM_KIND_STRING_OUTPUT,
+  CL_STREAM_KIND_BUFFER_INPUT,
 } cl_stream_kind_t;
 
 struct cl_stream {

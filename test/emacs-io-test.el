@@ -810,5 +810,27 @@
     (should (equal (cl-file-length s) 10))
     (cl-close s)))
 
+;; ── Buffer Input Stream ─────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-buffer-input-stream-read-char ()
+  "Test reading characters from a buffer input stream."
+  :expected-result :failed
+  (let ((buf (generate-new-buffer " *bis-test1*")))
+    (with-current-buffer buf (insert "hello"))
+    (let ((stream (cl-make-buffer-input-stream buf)))
+      (should (equal (cl-read-char stream) ?h))
+      (cl-close stream))
+    (kill-buffer buf)))
+
+(ert-deftest emacs-io-test-buffer-input-stream-start-end ()
+  "Test :start and :end keywords on buffer input stream."
+  :expected-result :failed
+  (let ((buf (generate-new-buffer " *bis-test3*")))
+    (with-current-buffer buf (insert "abcdef"))
+    (let ((stream (cl-make-buffer-input-stream buf :start 1 :end 4)))
+      (should (equal (cl-read-char stream) ?b))
+      (cl-close stream))
+    (kill-buffer buf)))
+
 (provide 'emacs-io-test)
 ;;; emacs-io-test.el ends here
