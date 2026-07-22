@@ -13,6 +13,7 @@
 
 typedef struct {
   cl_stream_t  *cached;
+  emacs_value   symbol;    /* global-ref'd symbol, for accessor */
 } synonym_impl_t;
 
 static ptrdiff_t syn_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
@@ -39,6 +40,7 @@ static int syn_close(cl_stream_t *s) {
 }
 
 static void syn_destroy(cl_stream_t *s) {
+  /* symbol is permanent, no need to free_global_ref */
   free(s->impl);
 }
 
@@ -73,10 +75,13 @@ static const cl_stream_ops_t synonym_stream_ops = {
   .file_length   = syn_file_length,
 };
 
-cl_stream_t *stream_create_synonym(cl_stream_t *target) {
+cl_stream_t *stream_create_synonym(cl_stream_t *target, emacs_env *env,
+                                    emacs_value symbol) {
   synonym_impl_t *si = calloc(1, sizeof(*si));
   if (!si) return NULL;
   si->cached = target;
+  if (env && env->is_not_nil(env, symbol))
+    si->symbol = env->make_global_ref(env, symbol);
 
   cl_stream_t *s = calloc(1, sizeof(*s));
   if (!s) { free(si); return NULL; }
@@ -282,15 +287,19 @@ emacs_value Fmake_synonym_stream(emacs_env *env, ptrdiff_t nargs,
     signal_error(env, "Synonym target is not a stream");
     return syms.v_nil;
   }
-  cl_stream_t *s = stream_create_synonym(target);
+  cl_stream_t *s = stream_create_synonym(target, env, args[0]);
   if (!s) { signal_error(env, "Cannot create synonym stream"); return syms.v_nil; }
   return euser_ptr_stream_make(env, s);
 }
 
 emacs_value Fsynonym_stream_symbol(emacs_env *env, ptrdiff_t nargs,
                                     emacs_value *args, void *data) {
-  (void)env; (void)nargs; (void)args; (void)data;
-  return syms.v_nil;
+  (void)nargs; (void)data;
+  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
+  if (!s || s->ops != &synonym_stream_ops)
+    { signal_error(env, "Not a synonym stream"); return syms.v_nil; }
+  synonym_impl_t *si = (synonym_impl_t *)s->impl;
+  return si->symbol ? si->symbol : syms.v_nil;
 }
 
 emacs_value Fmake_broadcast_stream(emacs_env *env, ptrdiff_t nargs,

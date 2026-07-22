@@ -32,6 +32,8 @@ emacs_value Fopen(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   int if_exists_action = -1;    /* -1=default, 0=nil, 1=supersede,
                                    2=append, 3=error, 4=overwrite */
   int if_does_not_exist_action = -1; /* -1=default, 0=nil, 1=error */
+  emacs_value ext_fmt = syms.v_nil;
+  bool have_ext_fmt = false;
 
   for (ptrdiff_t i = 1; i < nargs - 1; i += 2) {
     if (kw_eq_cached(env, args[i], syms.k_direction)) {
@@ -71,6 +73,8 @@ emacs_value Fopen(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
         if_does_not_exist_action = 1;
       else if (env->eq(env, args[i + 1], syms.v_nil))
         if_does_not_exist_action = 0;
+    } else if (kw_eq_cached(env, args[i], syms.k_external_format)) {
+      ext_fmt = args[i + 1]; have_ext_fmt = true;
     }
   }
 
@@ -82,7 +86,10 @@ emacs_value Fopen(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     cl_stream_t *s = stream_create_fd(fd, true, CL_STREAM_FLAG_INPUT);
     if (!s) { close(fd); return syms.v_nil; }
     stream_close(s);
-    return euser_ptr_stream_make(env, s);
+  if (have_ext_fmt)
+    s->external_format = env->make_global_ref(env, ext_fmt);
+
+  return euser_ptr_stream_make(env, s);
   }
 
   /* apply :if-exists defaults and actions */
@@ -302,8 +309,7 @@ emacs_value Fstream_external_format(emacs_env *env, ptrdiff_t nargs,
   (void)data; (void)nargs;
   cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
   if (!s) { signal_error(env, "Invalid stream"); return syms.v_nil; }
-  (void)s;
-  return eintern(env, ":default");
+  return s->external_format ? s->external_format : eintern(env, ":default");
 }
 
 emacs_value Ffile_string_length(emacs_env *env, ptrdiff_t nargs,

@@ -4,6 +4,8 @@
 
 ;; Load the module
 (module-load (expand-file-name "../emacs-io.so" (file-name-directory load-file-name)))
+;; Load the macros
+(load (expand-file-name "../src/emacs-io-macros.el" (file-name-directory load-file-name)))
 
 ;; ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -252,6 +254,15 @@
       (should (cl-open-stream-p stream))
       (cl-close stream)
       (should-not (cl-open-stream-p stream)))))
+
+(ert-deftest emacs-io-test-with-open-file ()
+  "Test cl-with-open-file macro."
+  (emacs-io-test--with-temp-file fname
+    (with-temp-file fname (insert "hello macro"))
+    (let ((result nil))
+      (cl-with-open-file (s fname :direction :input)
+        (setq result (cl-read-line s)))
+      (should (equal (car result) "hello macro")))))
 
 (ert-deftest emacs-io-test-file-open-probe-existing ()
   "Test :probe on existing file returns a closed stream."
@@ -700,10 +711,29 @@
       (should-not (cl-interactive-stream-p s))
       (cl-close s))))
 
-(ert-deftest emacs-io-test-stream-external-format ()
-  "Test cl-stream-external-format."
+(ert-deftest emacs-io-test-synonym-stream-symbol ()
+  "Test cl-synonym-stream-symbol returns the symbol."
+  (emacs-io-test--with-string-input "hi"
+    (let ((old (symbol-value '*standard-input*)))
+      (set '*standard-input* stream)
+      (unwind-protect
+          (let ((syn (cl-make-synonym-stream '*standard-input*)))
+            (should (eq (cl-synonym-stream-symbol syn) '*standard-input*))
+            (cl-close syn))
+        (set '*standard-input* old)))))
+
+(ert-deftest emacs-io-test-stream-external-format-stored ()
+  "Test cl-stream-external-format returns stored format."
   (emacs-io-test--with-string-input "abc"
     (should (eq (cl-stream-external-format stream) :default))))
+
+(ert-deftest emacs-io-test-stream-external-format-from-open ()
+  "Test cl-stream-external-format on a file stream."
+  (emacs-io-test--with-temp-file f
+    (with-temp-file f (insert "test"))
+    (let ((s (cl-open f :direction :input)))
+      (should (eq (cl-stream-external-format s) :default))
+      (cl-close s))))
 
 ;; ── Read Preserving Whitespace ──────────────────────────────────────────
 

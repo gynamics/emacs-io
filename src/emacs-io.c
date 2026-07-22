@@ -407,7 +407,7 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "\n(fn SYMBOL)", NULL);
 
   defun(env, "cl-synonym-stream-symbol", Fsynonym_stream_symbol, 1, 1,
-        "Return the symbol used by a synonym stream.\n"
+        "Return the symbol whose value is the synonym stream's target.\n"
         "\n(fn SYNONYM-STREAM)", NULL);
 
   defun(env, "cl-make-broadcast-stream", Fmake_broadcast_stream, 0, 16,
@@ -500,8 +500,8 @@ int emacs_module_init(struct emacs_runtime *runtime) {
   defun(env, "cl-stream-external-format", Fstream_external_format, 1, 1,
         "Return the external format of STREAM.\n"
         "\n"
-        "Currently always returns :default as encoding is not\n"
-        "implemented.\n"
+        "Returns the :EXTERNAL-FORMAT value passed to `cl-open',\n"
+        "or :default if none was specified.\n"
         "\n(fn STREAM)", NULL);
 
   defun(env, "cl-file-position", Ffile_position, 1, 3,
