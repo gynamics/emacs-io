@@ -1024,7 +1024,6 @@
 
 (ert-deftest emacs-io-test-buffer-input-stream-read-char ()
   "Test reading characters from a buffer input stream."
-  :expected-result :failed
   (let ((buf (generate-new-buffer " *bis-test1*")))
     (with-current-buffer buf (insert "hello"))
     (let ((stream (cl-make-buffer-input-stream buf)))
@@ -1034,7 +1033,6 @@
 
 (ert-deftest emacs-io-test-buffer-input-stream-start-end ()
   "Test :start and :end keywords on buffer input stream."
-  :expected-result :failed
   (let ((buf (generate-new-buffer " *bis-test3*")))
     (with-current-buffer buf (insert "abcdef"))
     (let ((stream (cl-make-buffer-input-stream buf :start 1 :end 4)))

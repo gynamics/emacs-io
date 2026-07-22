@@ -34,11 +34,14 @@ typedef struct {
 
 cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
                                         ptrdiff_t start, ptrdiff_t end) {
-  (void)buffer;
+  /* snapshot the buffer region — save/restore current buffer */
+  emacs_value old = efuncall(env, "current-buffer", 0, NULL);
+  efuncall(env, "set-buffer", 1, &buffer);
   emacs_value args[2];
-  args[0] = eint(env, start);
-  args[1] = eint(env, end);
+  args[0] = eint(env, start + 1);   /* Emacs positions are 1-indexed */
+  args[1] = eint(env, end + 1);
   emacs_value text = efuncall_cached(env, syms.fn_buffer_substring, 2, args);
+  efuncall(env, "set-buffer", 1, &old);
 
   ptrdiff_t slen = 0;
   if (!env->copy_string_contents(env, text, NULL, &slen)) return NULL;
