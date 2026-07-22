@@ -32,6 +32,16 @@
 
 ;; ── Stream Predicates ────────────────────────────────────────────────────
 
+(ert-deftest emacs-io-test-streamp ()
+  "Test cl-streamp."
+  (should-not (cl-streamp nil))
+  (should-not (cl-streamp 42))
+  (should-not (cl-streamp "hello"))
+  (emacs-io-test--with-string-input "abc"
+    (should (cl-streamp stream))
+    (cl-close stream)
+    (should (cl-streamp stream))))  ;; still a stream, just closed
+
 (ert-deftest emacs-io-test-open-stream-p ()
   "Test cl-open-stream-p."
   (emacs-io-test--with-string-input "abc"
@@ -388,6 +398,11 @@
   "Test cl-princ-to-string."
   (should (equal (cl-princ-to-string "hi") "hi"))
   (should (equal (cl-princ-to-string 42) "42")))
+
+(ert-deftest emacs-io-test-write-to-string ()
+  "Test cl-write-to-string."
+  (should (equal (cl-write-to-string "hello") "\"hello\""))
+  (should (equal (cl-write-to-string 42) "42")))
 
 ;; ── Read/Write Round Trip ────────────────────────────────────────────────
 

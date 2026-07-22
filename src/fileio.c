@@ -183,6 +183,15 @@ emacs_value Fclose(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
 /* ── stream predicates ────────────────────────────────────────────────── */
 
+emacs_value Fstreamp(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                      void *data) {
+  (void)data; (void)nargs;
+  if (env->is_not_nil(env, args[0]) && env->eq(env,
+        env->type_of(env, args[0]), eintern(env, "user-ptr")))
+    return syms.v_t;
+  return syms.v_nil;
+}
+
 emacs_value Fopen_stream_p(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                            void *data) {
   (void)data; (void)nargs;

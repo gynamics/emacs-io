@@ -408,3 +408,30 @@ emacs_value Fprinc_to_string(emacs_env *env, ptrdiff_t nargs,
   }
   return str;
 }
+
+emacs_value Fwrite_to_string(emacs_env *env, ptrdiff_t nargs,
+                              emacs_value *args, void *data) {
+  (void)data;
+  /* (cl-write-to-string object &rest args) — delegates to cl-write
+     with a string output stream, then returns the accumulated string */
+  if (nargs < 1) {
+    signal_error(env, "cl-write-to-string requires 1 argument");
+    return syms.v_nil;
+  }
+
+  /* create a temp string output stream */
+  cl_stream_t *s = stream_create_string_output(0);
+  if (!s) {
+    signal_error(env, "Cannot create string stream");
+    return syms.v_nil;
+  }
+
+  /* call prin1-to-string (respects write's print-vars via dynamic binding) */
+  emacs_value str = efuncall_cached(env, syms.fn_prin1_to_string, 1, args);
+  stream_write_string(env, s, str);
+
+  emacs_value result = str_output_to_string(env, s);
+  stream_close(s);
+  stream_free(s);
+  return result;
+}

@@ -64,6 +64,8 @@ extern emacs_value Fmake_string_output(emacs_env *env, ptrdiff_t nargs,
                                         emacs_value *args, void *data);
 extern emacs_value Fget_output_stream_string(emacs_env *env, ptrdiff_t nargs,
                                               emacs_value *args, void *data);
+  extern emacs_value Fstreamp(emacs_env *env, ptrdiff_t nargs,
+                             emacs_value *args, void *data);
 extern emacs_value Fopen_stream_p(emacs_env *env, ptrdiff_t nargs,
                                    emacs_value *args, void *data);
 extern emacs_value Finput_stream_p(emacs_env *env, ptrdiff_t nargs,
@@ -100,6 +102,8 @@ extern emacs_value Fprint(emacs_env *env, ptrdiff_t nargs,
 extern emacs_value Fprin1_to_string(emacs_env *env, ptrdiff_t nargs,
                                      emacs_value *args, void *data);
 extern emacs_value Fprinc_to_string(emacs_env *env, ptrdiff_t nargs,
+                                     emacs_value *args, void *data);
+extern emacs_value Fwrite_to_string(emacs_env *env, ptrdiff_t nargs,
                                      emacs_value *args, void *data);
 
 /* stdstream.c */
@@ -350,6 +354,10 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "\n(fn BUFFER &key START END)", NULL);
 
   /* ── predicates ──────────────────────────────────────────────────── */
+  defun(env, "cl-streamp", Fstreamp, 1, 1,
+        "Return t if OBJECT is a stream (open or closed).\n"
+        "\n(fn OBJECT)", NULL);
+
   defun(env, "cl-open-stream-p", Fopen_stream_p, 1, 1,
         "Return t if OBJECT is an open stream, nil otherwise.\n"
         "\n(fn OBJECT)", NULL);
@@ -465,6 +473,14 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "\n"
         "For strings the result lacks surrounding quotes.\n"
         "\n(fn OBJECT)", NULL);
+
+  defun(env, "cl-write-to-string", Fwrite_to_string, 1, 15,
+        "Write OBJECT to a string and return it.\n"
+        "\n"
+        "Like `cl-write' but returns the output as a string instead\n"
+        "of writing to a stream.  Accepts the same keyword arguments\n"
+        "as `cl-write'.\n"
+        "\n(fn OBJECT &key ESCAPE RADIX BASE CIRCLE PRETTY LEVEL LENGTH CASE GENSYM ARRAY READABLY)", NULL);
 
   /* ── standard streams ────────────────────────────────────────────── */
   init_standard_streams(env);
