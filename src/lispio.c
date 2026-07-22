@@ -26,15 +26,15 @@ static bool try_read_from_buffer(emacs_env *env, strbuf_t *sb,
   if (exit == emacs_funcall_exit_return) {
     /* Success: raw = (VALUE . POSITION).  Extract car and consumed count. */
     emacs_value pair = raw;
-    *result = efuncall(env, "car", 1, &pair);
-    emacs_value pos  = efuncall(env, "cdr", 1, &pair);
+    *result = efuncall_cached(env, syms.fn_car, 1, &pair);
+    emacs_value pos  = efuncall_cached(env, syms.fn_cdr, 1, &pair);
     *consumed = eint_extract(env, pos);
     return true;
   }
 
   /* read-from-string signalled an error.  Detect end-of-file (incomplete form). */
-  emacs_value sym = eintern(env, "nil");
-  emacs_value data = eintern(env, "nil");
+  emacs_value sym = syms.v_nil;
+  emacs_value data = syms.v_nil;
   env->non_local_exit_get(env, &sym, &data);
   bool is_eof = env->eq(env, sym, eintern(env, "end-of-file"));
   env->non_local_exit_clear(env);
@@ -58,16 +58,16 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                   void *data) {
   (void)data;
   /* (cl-read &optional stream eof-error-p eof-value recursive-p) */
-  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-input*");
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
   if (!s || !stream_is_open(s)) {
     signal_error(env, "cl-read: stream is closed");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
   strbuf_t *sb = strbuf_create(256);
-  if (!sb) { signal_error(env, "Memory allocation failed"); return eintern(env, "nil"); }
+  if (!sb) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
 
-  emacs_value result = eintern(env, "nil");
+  emacs_value result = syms.v_nil;
   ptrdiff_t consumed = 0;
   bool parsed = false;
   unsigned char chunk[4096];
@@ -82,7 +82,7 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       /* if a non-eof error was re-signalled, bail out */
       if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
         strbuf_free(sb);
-        return eintern(env, "nil");
+        return syms.v_nil;
       }
     }
 
@@ -105,22 +105,22 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
           }
           if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
             strbuf_free(sb);
-            return eintern(env, "nil");
+            return syms.v_nil;
           }
         }
       }
       /* nothing parsed — signal EOF or return eof-value */
       strbuf_free(sb);
       if (nargs >= 2 && !env->is_not_nil(env, args[1]))
-        return (nargs >= 3) ? args[2] : eintern(env, "nil");
+        return (nargs >= 3) ? args[2] : syms.v_nil;
       signal_error(env, "End of file on stream");
-      return eintern(env, "nil");
+      return syms.v_nil;
     }
 
     if (!strbuf_append(sb, (const char *)chunk, r)) {
       strbuf_free(sb);
       signal_error(env, "Memory allocation failed");
-      return eintern(env, "nil");
+      return syms.v_nil;
     }
   }
 
@@ -145,7 +145,7 @@ emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
      Just delegate to Emacs read-from-string. */
   if (nargs < 1) {
     signal_error(env, "cl-read-from-string requires 1 argument");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
   emacs_value read_args[2];
@@ -154,12 +154,12 @@ emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
 
   /* parse &key start */
   for (ptrdiff_t i = 2; i < nargs - 1; i += 2) {
-    if (kw_eq(env, args[i], ":start"))
+    if (kw_eq_cached(env, args[i], syms.k_start))
       read_args[1] = args[i + 1];
   }
 
-  emacs_value result = efuncall(env, "read-from-string", 2, read_args);
-  return efuncall(env, "car", 1, &result);
+  emacs_value result = efuncall_cached(env, syms.fn_read_from_string, 2, read_args);
+  return efuncall_cached(env, syms.fn_car, 1, &result);
 }
 
 /* ── cl-write ───────────────────────────────────────────────────────────
@@ -172,7 +172,7 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   (void)data;
   if (nargs < 1) {
     signal_error(env, "cl-write requires 1 argument");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
   emacs_value obj = args[0];
@@ -180,7 +180,7 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   /* find :stream key */
   for (ptrdiff_t i = 1; i < nargs - 1; i += 2) {
-    if (kw_eq(env, args[i], ":stream")) {
+    if (kw_eq_cached(env, args[i], syms.k_stream)) {
       s = euser_ptr_stream_get(env, args[i + 1]);
       break;
     }
@@ -188,7 +188,7 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   /* Use prin1-to-string + write to stream */
   if (s && stream_is_open(s)) {
-    emacs_value str = efuncall(env, "prin1-to-string", 1, &obj);
+    emacs_value str = efuncall_cached(env, syms.fn_prin1_to_string, 1, &obj);
     stream_write_string(env, s, str);
   }
 
@@ -202,16 +202,16 @@ emacs_value Fprin1(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   (void)data;
   if (nargs < 1) {
     signal_error(env, "cl-prin1 requires 1 argument");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
-  cl_stream_t *s = get_stream_or_default(env, args, nargs, 1, "*standard-output*");
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 1, syms.var_sout);
   if (!s || !stream_is_open(s)) {
     signal_error(env, "cl-prin1: stream is closed");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
-  emacs_value str = efuncall(env, "prin1-to-string", 1, args);
+  emacs_value str = efuncall_cached(env, syms.fn_prin1_to_string, 1, args);
   stream_write_string(env, s, str);
   return args[0];
 }
@@ -223,16 +223,16 @@ emacs_value Fprinc(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   (void)data;
   if (nargs < 1) {
     signal_error(env, "cl-princ requires 1 argument");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
-  cl_stream_t *s = get_stream_or_default(env, args, nargs, 1, "*standard-output*");
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 1, syms.var_sout);
   if (!s || !stream_is_open(s)) {
     signal_error(env, "cl-princ: stream is closed");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
-  emacs_value str = efuncall(env, "prin1-to-string", 1, args);
+  emacs_value str = efuncall_cached(env, syms.fn_prin1_to_string, 1, args);
   /* for strings: strip quotes for princ */
   if (env->eq(env, env->type_of(env, args[0]),
               eintern(env, "string"))) {
@@ -255,7 +255,7 @@ emacs_value Fprint(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                     void *data) {
   (void)data;
   /* cl-print = print with newline before */
-  cl_stream_t *s = get_stream_or_default(env, args, nargs, 1, "*standard-output*");
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 1, syms.var_sout);
   if (s && stream_is_open(s)) {
     unsigned char nl = '\n';
     stream_write(s, &nl, 1);
@@ -268,15 +268,15 @@ emacs_value Fprint(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 emacs_value Fprin1_to_string(emacs_env *env, ptrdiff_t nargs,
                               emacs_value *args, void *data) {
   (void)data;
-  if (nargs < 1) { signal_error(env, "Requires 1 argument"); return eintern(env, "nil"); }
-  return efuncall(env, "prin1-to-string", 1, args);
+  if (nargs < 1) { signal_error(env, "Requires 1 argument"); return syms.v_nil; }
+  return efuncall_cached(env, syms.fn_prin1_to_string, 1, args);
 }
 
 emacs_value Fprinc_to_string(emacs_env *env, ptrdiff_t nargs,
                               emacs_value *args, void *data) {
   (void)data;
-  if (nargs < 1) { signal_error(env, "Requires 1 argument"); return eintern(env, "nil"); }
-  emacs_value str = efuncall(env, "prin1-to-string", 1, args);
+  if (nargs < 1) { signal_error(env, "Requires 1 argument"); return syms.v_nil; }
+  emacs_value str = efuncall_cached(env, syms.fn_prin1_to_string, 1, args);
   /* for strings: remove surrounding quotes that prin1 added */
   if (env->eq(env, env->type_of(env, args[0]),
               eintern(env, "string"))) {

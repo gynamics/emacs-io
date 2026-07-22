@@ -21,16 +21,16 @@ emacs_value Fread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                         void *data) {
   (void)data;
   /* (cl-read-char &optional stream eof-error-p eof-value) */
-  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-input*");
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
   check_open(env, s, "cl-read-char");
 
   unsigned char ch;
   ptrdiff_t r = stream_read(s, &ch, 1);
   if (r <= 0) {
     if (nargs >= 2 && !env->is_not_nil(env, args[1])) /* eof-error-p nil */
-      return (nargs >= 3) ? args[2] : eintern(env, "nil");
+      return (nargs >= 3) ? args[2] : syms.v_nil;
     signal_error(env, "End of file on stream");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
   return eint(env, ch);
 }
@@ -42,11 +42,11 @@ emacs_value Fread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                        void *data) {
   (void)data;
-  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-input*");
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
   check_open(env, s, "cl-read-line");
 
   strbuf_t *sb = strbuf_create(4096);
-  if (!sb) { signal_error(env, "Memory allocation failed"); return eintern(env, "nil"); }
+  if (!sb) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
 
   unsigned char chunk[READ_LINE_CHUNK];
   bool saw_newline = false;
@@ -71,7 +71,7 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       if (!strbuf_append(sb, (const char *)chunk, nl_off)) {
         strbuf_free(sb);
         signal_error(env, "Memory allocation failed");
-        return eintern(env, "nil");
+        return syms.v_nil;
       }
       /* push leftover in forward order (FIFO queue: first in → first out) */
       for (ptrdiff_t i = nl_off + skip; i < r; i++)
@@ -84,16 +84,16 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     if (!strbuf_append(sb, (const char *)chunk, r)) {
       strbuf_free(sb);
       signal_error(env, "Memory allocation failed");
-      return eintern(env, "nil");
+      return syms.v_nil;
     }
   }
 
   if (sb->len == 0 && !saw_newline) {
     strbuf_free(sb);
     if (nargs >= 2 && !env->is_not_nil(env, args[1]))
-      return (nargs >= 3) ? args[2] : eintern(env, "nil");
+      return (nargs >= 3) ? args[2] : syms.v_nil;
     signal_error(env, "End of file on stream");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
   emacs_value line = strbuf_to_estring(env, sb);
@@ -101,8 +101,8 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   emacs_value cons_args[2];
   cons_args[0] = line;
-  cons_args[1] = saw_newline ? eintern(env, "nil") : eintern(env, "t");
-  return efuncall(env, "list", 2, cons_args);
+  cons_args[1] = saw_newline ? syms.v_nil : syms.v_t;
+  return efuncall_cached(env, syms.fn_list, 2, cons_args);
 }
 
 /* ── cl-read-byte ─────────────────────────────────────────────────────── */
@@ -111,16 +111,16 @@ emacs_value Fread_byte(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                        void *data) {
   (void)data;
   /* (cl-read-byte stream &optional eof-error-p eof-value) */
-  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-input*");
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
   check_open(env, s, "cl-read-byte");
 
   unsigned char b;
   ptrdiff_t r = stream_read(s, &b, 1);
   if (r <= 0) {
     if (nargs >= 2 && !env->is_not_nil(env, args[1]))
-      return (nargs >= 3) ? args[2] : eintern(env, "nil");
+      return (nargs >= 3) ? args[2] : syms.v_nil;
     signal_error(env, "End of file on stream");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
   return eint(env, b);
 }
@@ -132,20 +132,20 @@ emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   (void)data;
   /* (cl-peek-char &optional peek-type stream eof-error-p eof-value) */
   /* Simplified: just peek one character. */
-  cl_stream_t *s = get_stream_or_default(env, args, nargs,
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs,
                                           (nargs >= 1) ? 1 : 0,
-                                          "*standard-input*");
+                                          syms.var_sin);
   check_open(env, s, "cl-peek-char");
 
   if (!stream_listen(s)) {
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
   /* read one char, push it back via stream_unread */
   unsigned char ch;
   ptrdiff_t r = stream_read(s, &ch, 1);
   if (r <= 0) {
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
   /* push it back */
   stream_unread(s, ch);
@@ -159,13 +159,13 @@ emacs_value Funread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   (void)data;
   (void)nargs;
   (void)args;
-  if (nargs < 1) { signal_error(env, "cl-unread-char requires at least 1 argument"); return eintern(env, "nil"); }
-  cl_stream_t *s = get_stream_or_default(env, args, nargs,
+  if (nargs < 1) { signal_error(env, "cl-unread-char requires at least 1 argument"); return syms.v_nil; }
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs,
                                           (nargs >= 2) ? 1 : 0,
-                                          "*standard-input*");
+                                          syms.var_sin);
   intmax_t ch = eint_extract(env, args[0]);
   stream_unread(s, (int)ch);
-  return eintern(env, "nil");
+  return syms.v_nil;
 }
 
 /* ── cl-listen ────────────────────────────────────────────────────────── */
@@ -174,10 +174,10 @@ emacs_value Flisten(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                     void *data) {
   (void)data;
   /* (cl-listen &optional stream) */
-  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-input*");
-  if (!s || !stream_is_open(s)) return eintern(env, "nil");
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
+  if (!s || !stream_is_open(s)) return syms.v_nil;
 
-  return stream_listen(s) ? eintern(env, "t") : eintern(env, "nil");
+  return stream_listen(s) ? syms.v_t : syms.v_nil;
 }
 
 /* ── cl-read-sequence ──────────────────────────────────────────────────── */
@@ -188,7 +188,7 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   /* (cl-read-sequence sequence stream &key start end) */
   if (nargs < 2) {
     signal_error(env, "cl-read-sequence requires at least 2 arguments");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
   emacs_value seq = args[0];
@@ -203,9 +203,9 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   /* parse &key start end */
   for (ptrdiff_t i = 2; i < nargs; i += 2) {
     if (i + 1 >= nargs) break;
-    if (kw_eq(env, args[i], ":start"))
+    if (kw_eq_cached(env, args[i], syms.k_start))
       start = eint_extract(env, args[i + 1]);
-    else if (kw_eq(env, args[i], ":end"))
+    else if (kw_eq_cached(env, args[i], syms.k_end))
       end = eint_extract(env, args[i + 1]);
   }
 
@@ -216,7 +216,7 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   /* read a chunk and set vector elements */
   unsigned char *buf = malloc((size_t)count);
-  if (!buf) { signal_error(env, "Memory allocation failed"); return eintern(env, "nil"); }
+  if (!buf) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
 
   ptrdiff_t r = stream_read(s, buf, count);
   for (ptrdiff_t i = 0; i < r && i < count; i++)
@@ -235,7 +235,7 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
      Read up to N bytes from STREAM, return as a unibyte string. */
   if (nargs < 2) {
     signal_error(env, "cl-read-string requires at least 2 arguments");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
   ptrdiff_t want = (ptrdiff_t)eint_extract(env, args[0]);
@@ -251,9 +251,9 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     size_t to_read = (size_t)want < dlen ? (size_t)want : dlen;
     if (to_read == 0) {
       if (nargs >= 4 && !env->is_not_nil(env, args[2]))
-        return (nargs >= 4) ? args[3] : eintern(env, "nil");
+        return (nargs >= 4) ? args[3] : syms.v_nil;
       signal_error(env, "End of file on stream");
-      return eintern(env, "nil");
+      return syms.v_nil;
     }
     emacs_value result = env->make_unibyte_string(env, (const char *)daddr,
                                                    (ptrdiff_t)to_read);
@@ -263,15 +263,15 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   /* fallback: read into temp buffer */
   unsigned char *buf = malloc((size_t)want);
-  if (!buf) { signal_error(env, "Memory allocation failed"); return eintern(env, "nil"); }
+  if (!buf) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
 
   ptrdiff_t r = stream_read(s, buf, want);
   if (r <= 0) {
     free(buf);
     if (nargs >= 4 && !env->is_not_nil(env, args[2]))
-      return (nargs >= 4) ? args[3] : eintern(env, "nil");
+      return (nargs >= 4) ? args[3] : syms.v_nil;
     signal_error(env, "End of file on stream");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
   emacs_value result = env->make_unibyte_string(env, (const char *)buf, r);
@@ -286,7 +286,7 @@ emacs_value Fread_chunk(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   (void)data;
   /* (cl-read-chunk stream &optional max-bytes)
      Read up to MAX-BYTES (default 64KB), return (CHUNK . EOF-P). */
-  cl_stream_t *s = get_stream_or_default(env, args, nargs, 0, "*standard-input*");
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
   check_open(env, s, "cl-read-chunk");
 
   ptrdiff_t max = 65536;
@@ -301,23 +301,23 @@ emacs_value Fread_chunk(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     emacs_value chunk = env->make_unibyte_string(env, (const char *)daddr,
                                                   (ptrdiff_t)n);
     stream_advance(s, (ptrdiff_t)n);
-    emacs_value eof = (dlen - n == 0) ? eintern(env, "t") : eintern(env, "nil");
+    emacs_value eof = (dlen - n == 0) ? syms.v_t : syms.v_nil;
     emacs_value pair_args[2];
     pair_args[0] = chunk;
     pair_args[1] = eof;
-    return efuncall(env, "cons", 2, pair_args);
+    return efuncall_cached(env, syms.fn_cons, 2, pair_args);
   }
 
   unsigned char *buf = malloc((size_t)max);
-  if (!buf) { signal_error(env, "Memory allocation failed"); return eintern(env, "nil"); }
+  if (!buf) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
 
   ptrdiff_t r = stream_read(s, buf, max);
   emacs_value chunk = env->make_unibyte_string(env, (const char *)buf, r > 0 ? r : 0);
   free(buf);
 
-  emacs_value eof = (r <= 0) ? eintern(env, "t") : eintern(env, "nil");
+  emacs_value eof = (r <= 0) ? syms.v_t : syms.v_nil;
   emacs_value pair_args[2];
   pair_args[0] = chunk;
   pair_args[1] = eof;
-  return efuncall(env, "cons", 2, pair_args);
+  return efuncall_cached(env, syms.fn_cons, 2, pair_args);
 }

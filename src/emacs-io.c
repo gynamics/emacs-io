@@ -108,6 +108,8 @@ int emacs_module_init(struct emacs_runtime *runtime) {
   /* ensure we have at least emacs_env_31 */
   if ((size_t)env->size < sizeof(struct emacs_env_31)) return 1;
 
+  syms_init(env);
+
   cl_rt = runtime;
 
   /* ── reader ──────────────────────────────────────────────────────── */
@@ -274,24 +276,24 @@ int emacs_module_init(struct emacs_runtime *runtime) {
          "\n(fn SEQUENCE STREAM &key START END)", NULL);
 
   /* ── file I/O and streams ────────────────────────────────────────── */
-  defun(env, "cl-open", Fopen, 1, 6,
+  defun(env, "cl-open", Fopen, 1, 8,
         "Open a file and return a stream connected to it.\n"
         "\n"
         "FILENAME is a string naming the file.\n"
         "Keyword arguments:\n"
-        "  :DIRECTION   — one of :INPUT (default), :OUTPUT, :IO, or :PROBE\n"
-        "  :ELEMENT-TYPE — `character' (default) or `(unsigned-byte 8)'\n"
-        "  :IF-EXISTS   — one of :ERROR, :SUPERSEDE, :APPEND, :OVERWRITE\n"
-        "                 (default :ERROR for :INPUT, :SUPERSEDE for :OUTPUT)\n"
-        "  :IF-DOES-NOT-EXIST — planned, currently delegates to OS behavior\n"
+        "  :DIRECTION   — :INPUT (default), :OUTPUT, :IO, or :PROBE\n"
+        "  :ELEMENT-TYPE — character or (unsigned-byte 8)\n"
+        "  :IF-EXISTS   — :ERROR, :SUPERSEDE, :APPEND, :OVERWRITE, NIL\n"
+        "  :IF-DOES-NOT-EXIST — :ERROR, :CREATE, or NIL\n"
+        "PROBE returns a closed stream if the file exists, NIL otherwise.\n"
         "\n(fn FILENAME &key DIRECTION ELEMENT-TYPE IF-EXISTS IF-DOES-NOT-EXIST EXTERNAL-FORMAT)", NULL);
 
-  defun(env, "cl-close", Fclose, 1, 1,
+  defun(env, "cl-close", Fclose, 1, 3,
         "Close STREAM.\n"
         "\n"
-        "No further I/O operations may be performed on STREAM after closing.\n"
+        "If :ABORT is non-nil, pending output is discarded without flushing.\n"
         "Closing an already-closed stream is harmless and returns t.\n"
-        "\n(fn STREAM)", NULL);
+        "\n(fn STREAM &key ABORT)", NULL);
 
   defun(env, "cl-make-string-input-stream", Fmake_string_input, 1, 3,
         "Return a stream which reads characters from STRING.\n"

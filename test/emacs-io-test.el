@@ -57,6 +57,16 @@
   (emacs-io-test--with-string-input "abc"
     (should (eq (cl-stream-element-type stream) 'character))))
 
+(ert-deftest emacs-io-test-stream-element-type-binary ()
+  "Test cl-stream-element-type for binary file stream."
+  (emacs-io-test--with-temp-file fname
+    (with-temp-file fname (insert "binary test"))
+    (let ((s (cl-open fname :direction :input
+                      :element-type '(unsigned-byte 8))))
+      (unwind-protect
+          (should (equal (cl-stream-element-type s) '(unsigned-byte 8)))
+        (cl-close s)))))
+
 ;; ── String Input Stream ──────────────────────────────────────────────────
 
 (ert-deftest emacs-io-test-string-input-read-char ()
@@ -214,6 +224,65 @@
       (should (cl-open-stream-p stream))
       (cl-close stream)
       (should-not (cl-open-stream-p stream)))))
+
+(ert-deftest emacs-io-test-file-open-probe-existing ()
+  "Test :probe on existing file returns a closed stream."
+  (emacs-io-test--with-temp-file fname
+    (with-temp-file fname (insert "test"))
+    (let ((s (cl-open fname :direction :probe)))
+      (should s)
+      (should (cl-input-stream-p s))
+      (should-not (cl-open-stream-p s)))))   ;; probe returns closed stream
+
+(ert-deftest emacs-io-test-file-open-probe-missing ()
+  "Test :probe on missing file returns nil."
+  (let ((s (cl-open "/nonexistent-file-for-emacs-io-test" :direction :probe)))
+    (should (null s))))
+
+(ert-deftest emacs-io-test-file-open-if-exists-overwrite ()
+  "Test :if-exists :overwrite preserves existing content."
+  (emacs-io-test--with-temp-file fname
+    (with-temp-file fname (insert "old content"))
+    (let ((s (cl-open fname :direction :output :if-exists :overwrite)))
+      ;; should open, not truncate
+      (should s)
+      (cl-close s))
+    ;; verify file still exists with original content
+    (with-temp-buffer
+      (insert-file-contents fname)
+      (should (equal (buffer-string) "old content")))))
+
+(ert-deftest emacs-io-test-file-open-if-exists-nil-output ()
+  "Test :if-exists nil for :output returns nil if file exists."
+  (emacs-io-test--with-temp-file fname
+    (with-temp-file fname (insert "test"))
+    (should (null (cl-open fname :direction :output :if-exists nil)))))
+
+(ert-deftest emacs-io-test-file-open-if-exists-nil-input ()
+  "Test :if-exists nil for :input still opens existing file."
+  (emacs-io-test--with-temp-file fname
+    (with-temp-file fname (insert "test"))
+    (let ((s (cl-open fname :direction :input :if-exists nil)))
+      (should s)
+      (cl-close s))))
+
+(ert-deftest emacs-io-test-file-open-if-does-not-exist-nil ()
+  "Test :if-does-not-exist nil returns nil for missing file."
+  (should (null (cl-open "/nonexistent-file-for-emacs-io-test"
+                         :direction :input :if-does-not-exist nil))))
+
+(ert-deftest emacs-io-test-file-open-if-does-not-exist-error ()
+  "Test :if-does-not-exist :error signals on missing file."
+  (should-error (cl-open "/nonexistent-file-for-emacs-io-test"
+                         :direction :input :if-does-not-exist :error)))
+
+(ert-deftest emacs-io-test-close-abort ()
+  "Test cl-close :abort discards pending output."
+  (let ((s (cl-make-string-output-stream)))
+    (cl-write-string "should be discarded" s)
+    (cl-close s :abort t)
+    ;; closing with :abort discards output, so the stream is closed
+    (should-not (cl-open-stream-p s))))
 
 ;; ── Lisp Reader ──────────────────────────────────────────────────────────
 

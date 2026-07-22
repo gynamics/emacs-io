@@ -81,7 +81,7 @@ static ptrdiff_t fill_chunk(buffer_input_full_t *bi) {
   emacs_value args[2];
   args[0] = eint(env, bi->pos);
   args[1] = eint(env, bi->pos + to_read);
-  emacs_value text = efuncall(env, "buffer-substring-no-properties", 2, args);
+  emacs_value text = efuncall_cached(env, syms.fn_buffer_substring, 2, args);
 
   ptrdiff_t copied = (ptrdiff_t)bi->chunk_size;
   if (!env->copy_string_contents(env, text, bi->chunk, &copied)) return 0;
@@ -148,24 +148,24 @@ emacs_value Fmake_buffer_input_stream(emacs_env *env, ptrdiff_t nargs,
   (void)data;
   if (nargs < 1) {
     signal_error(env, "cl-make-buffer-input-stream requires 1 argument (buffer)");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
   ptrdiff_t start = 0;
   ptrdiff_t end = eint_extract(env,
-    efuncall(env, "buffer-size", 1, (emacs_value[]){ args[0] }));
+    efuncall_cached(env, syms.fn_buffer_size, 1, (emacs_value[]){ args[0] }));
 
   for (ptrdiff_t i = 1; i < nargs - 1; i += 2) {
-    if (kw_eq(env, args[i], ":start"))
+    if (kw_eq_cached(env, args[i], syms.k_start))
       start = eint_extract(env, args[i + 1]);
-    else if (kw_eq(env, args[i], ":end"))
+    else if (kw_eq_cached(env, args[i], syms.k_end))
       end = eint_extract(env, args[i + 1]);
   }
 
   cl_stream_t *s = stream_create_buffer_input(env, args[0], start, end);
   if (!s) {
     signal_error(env, "Cannot create buffer input stream");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
   return euser_ptr_stream_make(env, s);
 }

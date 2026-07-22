@@ -278,7 +278,7 @@ static ptrdiff_t sos_file_position(cl_stream_t *s) {
 
 emacs_value str_output_to_string(emacs_env *env, cl_stream_t *s) {
   str_output_impl_t *so = (str_output_impl_t *)s->impl;
-  if (!so) return eintern(env, "nil");
+  if (!so) return syms.v_nil;
 
   if (!so->head) return env->make_string(env, "", 0);
 
@@ -291,7 +291,7 @@ emacs_value str_output_to_string(emacs_env *env, cl_stream_t *s) {
   for (str_block_t *bk = so->head; bk; bk = bk->next) nblocks++;
 
   emacs_value *elts = malloc((size_t)nblocks * sizeof(emacs_value));
-  if (!elts) return eintern(env, "nil");
+  if (!elts) return syms.v_nil;
   str_block_t *bk = so->head;
   for (int i = 0; i < nblocks; i++, bk = bk->next) {
     if (!bk) break;
@@ -312,14 +312,14 @@ emacs_value Fmake_string_input(emacs_env *env, ptrdiff_t nargs,
   /* (cl-make-string-input-stream string &optional start end) */
   if (nargs < 1) {
     signal_error(env, "cl-make-string-input-stream requires 1 argument");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
   ptrdiff_t slen = 0;
   char *str = estring_alloc(env, args[0], &slen);
   if (!str) {
     signal_error(env, "Cannot extract string");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
 
   ptrdiff_t start = 0;
@@ -339,7 +339,7 @@ emacs_value Fmake_string_input(emacs_env *env, ptrdiff_t nargs,
   if (!s) {
     free(str);
     signal_error(env, "Cannot create string input stream");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
   string_input_impl_t *si = (string_input_impl_t *)s->impl;
   si->pos = (size_t)start;
@@ -356,13 +356,13 @@ emacs_value Fmake_string_output(emacs_env *env, ptrdiff_t nargs,
   /* (cl-make-string-output-stream &key element-type size) */
   size_t hint = 0;
   for (ptrdiff_t i = 0; i < nargs - 1; i += 2) {
-    if (kw_eq(env, args[i], ":size"))
+    if (kw_eq_cached(env, args[i], syms.k_size))
       hint = (size_t)eint_extract(env, args[i + 1]);
   }
   cl_stream_t *s = stream_create_string_output(hint);
   if (!s) {
     signal_error(env, "Cannot create string output stream");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
   return euser_ptr_stream_make(env, s);
 }
@@ -374,12 +374,12 @@ emacs_value Fget_output_stream_string(emacs_env *env, ptrdiff_t nargs,
   (void)data;
   if (nargs < 1) {
     signal_error(env, "cl-get-output-stream-string requires 1 argument");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
   cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
   if (!s || s->kind != CL_STREAM_KIND_STRING_OUTPUT) {
     signal_error(env, "Not a string output stream");
-    return eintern(env, "nil");
+    return syms.v_nil;
   }
   return str_output_to_string(env, s);
 }

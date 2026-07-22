@@ -14,6 +14,7 @@
 #define CL_STREAM_FLAG_OUTPUT      (1u << 1)
 #define CL_STREAM_FLAG_NONBLOCK    (1u << 2)
 #define CL_STREAM_FLAG_INTERACTIVE (1u << 3)
+#define CL_STREAM_FLAG_BINARY      (1u << 4)
 
 /* ── forward declarations ─────────────────────────────────────────────── */
 
