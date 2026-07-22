@@ -122,6 +122,7 @@ emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
 
   ptrdiff_t start = 0;
   ptrdiff_t end = -1;
+  bool preserve_ws = false;
   bool eoferr = (nargs < 2) || env->is_not_nil(env, args[1]);
   emacs_value eofval = (nargs >= 3) ? args[2] : syms.v_nil;
 
@@ -130,6 +131,8 @@ emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
       start = eint_extract(env, args[i + 1]);
     else if (kw_eq_cached(env, args[i], syms.k_end))
       end = eint_extract(env, args[i + 1]);
+    else if (kw_eq_cached(env, args[i], syms.k_preserve_whitespace))
+      preserve_ws = env->is_not_nil(env, args[i + 1]);
   }
 
   ptrdiff_t slen = 0;
@@ -141,11 +144,11 @@ emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
   if (start > slen) { free(str); return eofval; }
 
   emacs_value sstr = env->make_string(env, str + start, end - start);
-  free(str);
 
   emacs_value raw = efuncall_cached(env, syms.fn_read_from_string, 1, &sstr);
   if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
     env->non_local_exit_clear(env);
+    free(str);
     if (!eoferr) return eofval;
     signal_error(env, "End of file on string");
     return syms.v_nil;
@@ -154,13 +157,23 @@ emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
   emacs_value car_val = efuncall_cached(env, syms.fn_car, 1, &raw);
   ptrdiff_t pos = eint_extract(env, efuncall_cached(env, syms.fn_cdr, 1, &raw));
   if (pos == 0 && end > start) {
-    /* nothing was read */
+    free(str);
     if (!eoferr) return eofval;
     signal_error(env, "End of file on string");
     return syms.v_nil;
   }
 
-  /* return (value . pos+start) to reproduce the position in the original string */
+  /* strip trailing whitespace unless :preserve-whitespace */
+  if (pos > 0 && !preserve_ws) {
+    const char *base = str + start;
+    while (pos > 0 &&
+           (base[pos - 1] == ' '  || base[pos - 1] == '\t' ||
+            base[pos - 1] == '\n' || base[pos - 1] == '\r' ||
+            base[pos - 1] == '\f'))
+      pos--;
+  }
+  free(str);
+
   emacs_value cons_args[2];
   cons_args[0] = car_val;
   cons_args[1] = eint(env, start + pos);

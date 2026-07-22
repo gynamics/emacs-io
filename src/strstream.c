@@ -374,6 +374,12 @@ emacs_value Fmake_string_output(emacs_env *env, ptrdiff_t nargs,
   for (ptrdiff_t i = 0; i < nargs - 1; i += 2) {
     if (kw_eq_cached(env, args[i], syms.k_size))
       hint = (size_t)eint_extract(env, args[i + 1]);
+    else if (kw_eq_cached(env, args[i], syms.k_element_type)) {
+      if (!env->eq(env, args[i + 1], syms.v_character)) {
+        signal_error(env, "string-output-stream: only character element type supported");
+        return syms.v_nil;
+      }
+    }
   }
   cl_stream_t *s = stream_create_string_output(hint);
   if (!s) {
