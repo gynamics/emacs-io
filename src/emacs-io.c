@@ -236,7 +236,7 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "Destructively modify SEQUENCE by replacing its elements\n"
         "with elements read from STREAM.\n"
         "\n"
-        "SEQUENCE must be a vector or list.  Reading stops when the sequence\n"
+        "SEQUENCE must be a vector, list, or string.  Reading stops when the sequence\n"
         "is full or end of file is reached.\n"
         "Keywords :START and :END delimit the affected subsequence.\n"
         "Returns the index of the first element not updated.\n"
@@ -339,7 +339,7 @@ int emacs_module_init(struct emacs_runtime *runtime) {
   defun(env, "cl-write-sequence", Fwrite_sequence, 2, 6,
         "Write the elements of SEQUENCE to STREAM.\n"
         "\n"
-        "SEQUENCE must be a vector or list.  Writing starts at :START\n"
+        "SEQUENCE must be a vector, list, or string.  Writing starts at :START\n"
         "and stops at :END (default the length of SEQUENCE).\n"
         "Returns SEQUENCE.\n"
          "\n(fn SEQUENCE STREAM &key START END)", NULL);

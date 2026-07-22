@@ -134,11 +134,21 @@ emacs_value Fread_char_no_hang(emacs_env *env, ptrdiff_t nargs,
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
   check_open(env, s, "cl-read-char-no-hang");
 
-  if (!stream_listen(s)) return syms.v_nil;
+  if (!stream_listen(s)) {
+    if (nargs >= 2 && !env->is_not_nil(env, args[1]))
+      return (nargs >= 3) ? args[2] : syms.v_nil;
+    return syms.v_nil;
+  }
 
   unsigned char ch;
   ptrdiff_t r = stream_read(s, &ch, 1);
-  if (r <= 0) return syms.v_nil;
+  if (r <= 0) {
+    if (nargs >= 2 && !env->is_not_nil(env, args[1]))
+      return (nargs >= 3) ? args[2] : syms.v_nil;
+    if (nargs >= 2 && env->is_not_nil(env, args[1]))
+      { signal_error(env, "End of file on stream"); return syms.v_nil; }
+    return syms.v_nil;
+  }
   return eint(env, ch);
 }
 
@@ -236,15 +246,20 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     signal_error(env, "Stream is closed");
 
   bool is_vec = env->eq(env, env->type_of(env, seq), eintern(env, "vector"));
-  bool is_list = !is_vec && env->eq(env, env->type_of(env, seq),
-                                     eintern(env, "cons"));
-  if (!is_vec && !is_list) {
-    signal_error(env, "cl-read-sequence: SEQUENCE must be a vector or list");
+  bool is_str = !is_vec && env->eq(env, env->type_of(env, seq), syms.v_string);
+  bool is_list = !is_vec && !is_str &&
+                 env->eq(env, env->type_of(env, seq), eintern(env, "cons"));
+  if (!is_vec && !is_list && !is_str) {
+    signal_error(env, "cl-read-sequence: SEQUENCE must be a vector, list, or string");
     return syms.v_nil;
   }
 
   ptrdiff_t len = is_vec ? env->vec_size(env, seq)
-                         : 1 << 30;
+               : is_str ? 0 : 1 << 30;
+  if (is_str) {
+    env->copy_string_contents(env, seq, NULL, &len);
+    len--;  /* exclude null */
+  }
   ptrdiff_t start = 0;
   ptrdiff_t end = len;
 
@@ -257,7 +272,7 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   if (start < 0) start = 0;
-  if (is_vec && end > len) end = len;
+  if ((is_vec || is_str) && end > len) end = len;
   ptrdiff_t count = end - start;
   if (count <= 0) return eint(env, start);
 
@@ -269,6 +284,20 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     for (ptrdiff_t i = 0; i < r && i < count; i++)
       env->vec_set(env, seq, start + i, eint(env, buf[i]));
 
+    free(buf);
+    return eint(env, start + (r > 0 ? r : 0));
+  }
+
+  if (is_str) {
+    unsigned char *buf = malloc((size_t)count);
+    if (!buf) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
+
+    ptrdiff_t r = stream_read(s, buf, count);
+    emacs_value aset_sym = eintern(env, "aset");
+    for (ptrdiff_t i = 0; i < r && i < count; i++) {
+      emacs_value av[3] = { seq, eint(env, start + i), eint(env, buf[i]) };
+      env->funcall(env, aset_sym, 3, av);
+    }
     free(buf);
     return eint(env, start + (r > 0 ? r : 0));
   }
@@ -413,34 +442,65 @@ emacs_value Fread_delimited_list(emacs_env *env, ptrdiff_t nargs,
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 1, syms.var_sin);
   check_open(env, s, "cl-read-delimited-list");
 
-  /* build list in reverse, then reverse at end */
+  /* accumulate chars into buffer, call read-from-string at each form */
+  strbuf_t *sb = strbuf_create(256);
+  if (!sb) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
+
   emacs_value lst = syms.v_nil;
+  bool had_data = false;
 
   for (;;) {
-    /* peek at next char */
     if (!stream_listen(s)) break;
     unsigned char ch;
     ptrdiff_t r = stream_read(s, &ch, 1);
     if (r <= 0) break;
 
-    if ((int)ch == delim) {
-      /* found delimiter — unread it (per CL spec) */
-      stream_unread(s, ch);
-      break;
+    if ((int)ch == delim)
+      break;  /* delimiter consumed per CL spec */
+
+    had_data = true;
+    /* skip whitespace between forms */
+    if (sb->len == 0 && (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'))
+      continue;
+
+    strbuf_append(sb, (const char *)&ch, 1);
+
+    /* try to parse what we have */
+    emacs_value estr = env->make_string(env, sb->data, (ptrdiff_t)sb->len);
+    emacs_value read_args[1] = { estr };
+    emacs_value raw = efuncall_cached(env, syms.fn_read_from_string, 1, read_args);
+
+    if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
+      /* incomplete form — need more data */
+      env->non_local_exit_clear(env);
+      continue;
     }
 
-    /* push this character onto the front of the list */
-    emacs_value pair_args[2];
-    pair_args[0] = eint(env, ch);
-    pair_args[1] = lst;
-    lst = efuncall_cached(env, syms.fn_cons, 2, pair_args);
+    /* got a complete form */
+    emacs_value val = efuncall_cached(env, syms.fn_car, 1, &raw);
+    ptrdiff_t pos = eint_extract(env, efuncall_cached(env, syms.fn_cdr, 1, &raw));
+
+    if (pos > 0) {
+      /* form was read successfully */
+      emacs_value pair[2] = { val, lst };
+      lst = efuncall_cached(env, syms.fn_cons, 2, pair);
+
+      /* remove consumed chars from buffer */
+      if ((size_t)pos < sb->len)
+        memmove(sb->data, sb->data + pos, sb->len - (size_t)pos);
+      sb->len -= (size_t)pos;
+      sb->data[sb->len] = '\0';
+    }
   }
 
-  /* reverse the list */
-  emacs_value rev_args[1];
-  rev_args[0] = lst;
-  emacs_value result = efuncall(env, "reverse", 1, rev_args);
-  return result;
+  strbuf_free(sb);
+
+  if (!had_data && env->is_not_nil(env, lst)) {
+    /* nothing parsed but delimiter found at start — return nil */
+    return syms.v_nil;
+  }
+
+  return efuncall(env, "reverse", 1, &lst);
 }
 
 /* ── cl-y-or-n-p ─────────────────────────────────────────────────────

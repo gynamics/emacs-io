@@ -701,6 +701,30 @@
                   (cl-write-sequence (list 72 101 108 108 111) stream))))
     (should (equal result "Hello"))))
 
+(ert-deftest emacs-io-test-read-sequence-string ()
+  "Test cl-read-sequence with a string."
+  (emacs-io-test--with-string-input "abc"
+    (let ((s (make-string 3 ?\ )))
+      (should (equal (cl-read-sequence s stream) 3))
+      (should (equal s "abc")))))
+
+(ert-deftest emacs-io-test-write-sequence-string ()
+  "Test cl-write-sequence with a string."
+  (let ((result (emacs-io-test--with-string-output
+                  (cl-write-sequence "Hello" stream))))
+    (should (equal result "Hello"))))
+
+(ert-deftest emacs-io-test-read-delimited-list-objects ()
+  "Test cl-read-delimited-list reads Lisp objects."
+  (emacs-io-test--with-string-input "1 2 3)"
+    (should (equal (cl-read-delimited-list ?\) stream)
+                   '(1 2 3)))))
+
+(ert-deftest emacs-io-test-read-char-no-hang-eof ()
+  "Test cl-read-char-no-hang EOF handling."
+  (emacs-io-test--with-string-input ""
+    (should (eq (cl-read-char-no-hang stream nil :eof) :eof))))
+
 ;; ── Stream Predicates & Introspection ───────────────────────────────────
 
 (ert-deftest emacs-io-test-interactive-stream-p ()
@@ -745,19 +769,6 @@
     (should (equal (cl-read stream) 456))))
 
 ;; ── Read Delimited List ─────────────────────────────────────────────────
-
-(ert-deftest emacs-io-test-read-delimited-list ()
-  "Test cl-read-delimited-list."
-  (emacs-io-test--with-string-input "abcdefg"
-    (should (equal (cl-read-delimited-list ?d stream)
-                   '(?a ?b ?c)))
-    (should (equal (cl-read-char stream) ?d))))
-
-(ert-deftest emacs-io-test-read-delimited-list-delim-unread ()
-  "Test delimiter is left on stream after read-delimited-list."
-  (emacs-io-test--with-string-input "hello)"
-    (cl-read-delimited-list ?\) stream)
-    (should (equal (cl-read-char stream) ?\)))))
 
 ;; ── Pretty Print ────────────────────────────────────────────────────────
 

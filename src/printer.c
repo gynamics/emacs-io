@@ -213,14 +213,20 @@ emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   check_open(env, s, "cl-write-sequence");
 
   bool is_vec = env->eq(env, env->type_of(env, seq), eintern(env, "vector"));
-  bool is_list = !is_vec && env->eq(env, env->type_of(env, seq),
-                                     eintern(env, "cons"));
-  if (!is_vec && !is_list) {
-    signal_error(env, "cl-write-sequence: SEQUENCE must be a vector or list");
+  bool is_str = !is_vec && env->eq(env, env->type_of(env, seq), syms.v_string);
+  bool is_list = !is_vec && !is_str &&
+                 env->eq(env, env->type_of(env, seq), eintern(env, "cons"));
+  if (!is_vec && !is_list && !is_str) {
+    signal_error(env, "cl-write-sequence: SEQUENCE must be a vector, list, or string");
     return syms.v_nil;
   }
 
-  ptrdiff_t len = is_vec ? env->vec_size(env, seq) : 1 << 30;
+  ptrdiff_t len = is_vec ? env->vec_size(env, seq)
+               : is_str ? 0 : 1 << 30;
+  if (is_str) {
+    env->copy_string_contents(env, seq, NULL, &len);
+    len--;  /* exclude null */
+  }
   ptrdiff_t start = 0;
   ptrdiff_t end = len;
 
@@ -233,7 +239,7 @@ emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   if (start < 0) start = 0;
-  if (is_vec && end > len) end = len;
+  if ((is_vec || is_str) && end > len) end = len;
   ptrdiff_t count = end - start;
   if (count <= 0) return seq;
 
@@ -246,6 +252,16 @@ emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                 env->vec_get(env, seq, start + i));
 
     stream_write(s, buf, count);
+    free(buf);
+    return seq;
+  }
+
+  if (is_str) {
+    unsigned char *buf = malloc((size_t)count);
+    if (!buf) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
+    ptrdiff_t copied = len + 1;
+    env->copy_string_contents(env, seq, (char *)buf, &copied);
+    stream_write(s, buf + start, count);
     free(buf);
     return seq;
   }
