@@ -29,7 +29,7 @@ emacs_value Fread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   if (r <= 0) {
     if (nargs >= 2 && !env->is_not_nil(env, args[1])) /* eof-error-p nil */
       return (nargs >= 3) ? args[2] : syms.v_nil;
-    signal_error(env, "End of file on stream");
+    signal_end_of_file(env, s);
     return syms.v_nil;
   }
   return eint(env, ch);
@@ -92,7 +92,7 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     strbuf_free(sb);
     if (nargs >= 2 && !env->is_not_nil(env, args[1]))
       return (nargs >= 3) ? args[2] : syms.v_nil;
-    signal_error(env, "End of file on stream");
+    signal_end_of_file(env, s);
     return syms.v_nil;
   }
 
@@ -119,7 +119,7 @@ emacs_value Fread_byte(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   if (r <= 0) {
     if (nargs >= 2 && !env->is_not_nil(env, args[1]))
       return (nargs >= 3) ? args[2] : syms.v_nil;
-    signal_error(env, "End of file on stream");
+    signal_end_of_file(env, s);
     return syms.v_nil;
   }
   return eint(env, b);
@@ -146,7 +146,7 @@ emacs_value Fread_char_no_hang(emacs_env *env, ptrdiff_t nargs,
     if (nargs >= 2 && !env->is_not_nil(env, args[1]))
       return (nargs >= 3) ? args[2] : syms.v_nil;
     if (nargs >= 2 && env->is_not_nil(env, args[1]))
-      { signal_error(env, "End of file on stream"); return syms.v_nil; }
+      { signal_end_of_file(env, s); return syms.v_nil; }
     return syms.v_nil;
   }
   return eint(env, ch);
@@ -345,7 +345,7 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     if (to_read == 0) {
       if (nargs >= 4 && !env->is_not_nil(env, args[2]))
         return (nargs >= 4) ? args[3] : syms.v_nil;
-      signal_error(env, "End of file on stream");
+      signal_end_of_file(env, s);
       return syms.v_nil;
     }
     emacs_value result = env->make_unibyte_string(env, (const char *)daddr,
@@ -363,7 +363,7 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     free(buf);
     if (nargs >= 4 && !env->is_not_nil(env, args[2]))
       return (nargs >= 4) ? args[3] : syms.v_nil;
-    signal_error(env, "End of file on stream");
+    signal_end_of_file(env, s);
     return syms.v_nil;
   }
 

@@ -791,6 +791,11 @@
     (cl-read-char stream)
     (should-error (cl-read-char stream))))
 
+(ert-deftest emacs-io-test-end-of-file-condition ()
+  "Test that EOF signals end-of-file condition, not generic error."
+  (emacs-io-test--with-string-input ""
+    (should-error (cl-read-char stream) :type 'end-of-file)))
+
 ;; ── scale/stress ────────────────────────────────────────────────────────
 
 (ert-deftest emacs-io-test-large-string-output ()

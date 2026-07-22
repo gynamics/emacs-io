@@ -143,10 +143,10 @@ emacs_value Ffresh_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 emacs_value Ffinish_output(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                             void *data) {
   (void)data;
-  /* (cl-finish-output &optional stream) */
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sout);
   check_open(env, s, "cl-finish-output");
-  stream_finish(s);
+  if (stream_finish(s) < 0)
+    signal_error(env, "cl-finish-output: I/O error");
   return syms.v_nil;
 }
 
@@ -155,10 +155,10 @@ emacs_value Ffinish_output(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 emacs_value Fforce_output(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                            void *data) {
   (void)data;
-  /* (cl-force-output &optional stream) */
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sout);
   check_open(env, s, "cl-force-output");
-  stream_flush(s);
+  if (stream_flush(s) < 0)
+    signal_error(env, "cl-force-output: I/O error");
   return syms.v_nil;
 }
 

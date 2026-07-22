@@ -94,7 +94,7 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       strbuf_free(sb);
       if (nargs >= 2 && !env->is_not_nil(env, args[1]))
         return (nargs >= 3) ? args[2] : syms.v_nil;
-      signal_error(env, "End of file on stream");
+      signal_end_of_file(env, s);
       return syms.v_nil;
     }
 

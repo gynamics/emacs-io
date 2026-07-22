@@ -30,7 +30,7 @@ typedef struct {
   emacs_value fn_car, fn_cdr, fn_list, fn_cons, fn_concat, fn_set;
   emacs_value fn_symbol_value, fn_read_from_string, fn_prin1_to_string;
   emacs_value fn_buffer_substring, fn_buffer_size;
-  emacs_value fn_defalias, fn_provide, fn_error;
+  emacs_value fn_defalias, fn_provide, fn_error, fn_signal;
 
   /* common values */
   emacs_value v_nil, v_t, v_character, v_string;
@@ -89,6 +89,7 @@ void check_open(emacs_env *env, cl_stream_t *s, const char *op);
 /* ── error signaling ──────────────────────────────────────────────────── */
 
 void signal_error(emacs_env *env, const char *msg);
+void signal_end_of_file(emacs_env *env, cl_stream_t *s);
 
 /* ── keyword helpers ──────────────────────────────────────────────────── */
 

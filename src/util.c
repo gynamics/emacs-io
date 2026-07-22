@@ -118,7 +118,14 @@ cl_stream_t *get_stream_or_default(emacs_env *env, emacs_value *args,
 void signal_error(emacs_env *env, const char *msg) {
   emacs_value args[1];
   args[0] = estring(env, msg);
-  efuncall(env, "error", 1, args);
+  efuncall_cached(env, syms.fn_error, 1, args);
+}
+
+void signal_end_of_file(emacs_env *env, cl_stream_t *s) {
+  emacs_value sv = euser_ptr_stream_make(env, s);
+  emacs_value data = efuncall_cached(env, syms.fn_list, 1, &sv);
+  emacs_value args[2] = { syms.v_end_of_file, data };
+  efuncall_cached(env, syms.fn_signal, 2, args);
 }
 
 /* ── pre-interned symbol table ─────────────────────────────────────────── */
@@ -177,6 +184,7 @@ void syms_init(emacs_env *env) {
   syms.fn_defalias       = G(eintern(env, "defalias"));
   syms.fn_provide        = G(eintern(env, "provide"));
   syms.fn_error          = G(eintern(env, "error"));
+  syms.fn_signal         = G(eintern(env, "signal"));
 
   syms.v_nil       = G(eintern(env, "nil"));
   syms.v_t         = G(eintern(env, "t"));
