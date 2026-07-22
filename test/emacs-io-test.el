@@ -894,6 +894,31 @@
 
 ;; ── Compound Streams ────────────────────────────────────────────────────
 
+(ert-deftest emacs-io-test-synonym-stream ()
+  "Test cl-make-synonym-stream."
+  (emacs-io-test--with-string-input "hello"
+    (let ((old-sin (symbol-value '*standard-input*)))
+      (set '*standard-input* stream)
+      (unwind-protect
+          (let ((syn (cl-make-synonym-stream '*standard-input*)))
+            (should (cl-input-stream-p syn))
+            (should (equal (cl-read-char syn) ?h))
+            (cl-close syn))
+        (set '*standard-input* old-sin)))))
+
+(ert-deftest emacs-io-test-synonym-stream-output ()
+  "Test cl-make-synonym-stream output."
+  (let ((s1 (cl-make-string-output-stream))
+        (old-sout (symbol-value '*standard-output*)))
+    (set '*standard-output* s1)
+    (unwind-protect
+        (let ((syn (cl-make-synonym-stream '*standard-output*)))
+          (cl-write-string "hello" syn)
+          (cl-close syn))
+      (set '*standard-output* old-sout))
+    (should (equal (cl-get-output-stream-string s1) "hello"))
+    (cl-close s1)))
+
 (ert-deftest emacs-io-test-broadcast-stream ()
   "Test cl-make-broadcast-stream."
   (let ((s1 (cl-make-string-output-stream))

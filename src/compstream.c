@@ -4,46 +4,33 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ── synonym stream ──────────────────────────────────────────────────── */
+/* ── synonym stream ────────────────────────────────────────────────────
+   The target stream is resolved once at construction using the
+   constructor's valid emacs_env, then cached.  The vtable ops
+   forward to the cached target.  Re-resolution on each I/O (per CL
+   spec) would require calling Emacs Lisp outside the mutex, which
+   is not currently supported by the dispatch layer. */
 
 typedef struct {
-  char *symbol_name;   /* interned-name of the dynamic variable */
+  cl_stream_t  *cached;
 } synonym_impl_t;
 
 static ptrdiff_t syn_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
-  synonym_impl_t *si = (synonym_impl_t *)s->impl;
-  if (!si || !si->symbol_name) return 0;
-  emacs_env *env = cl_env();
-  if (!env) return 0;
-  emacs_value sv = efuncall(env, "symbol-value", 1,
-                             (emacs_value[]){ eintern(env, si->symbol_name) });
-  cl_stream_t *target = euser_ptr_stream_get(env, sv);
-  if (!target || !stream_is_open(target)) return 0;
-  return stream_read(target, buf, n);
+  cl_stream_t *t = ((synonym_impl_t *)s->impl)->cached;
+  if (!t || !stream_is_open(t)) return 0;
+  return stream_read(t, buf, n);
 }
 
 static ptrdiff_t syn_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
-  synonym_impl_t *si = (synonym_impl_t *)s->impl;
-  if (!si || !si->symbol_name) return 0;
-  emacs_env *env = cl_env();
-  if (!env) return 0;
-  emacs_value sv = efuncall(env, "symbol-value", 1,
-                             (emacs_value[]){ eintern(env, si->symbol_name) });
-  cl_stream_t *target = euser_ptr_stream_get(env, sv);
-  if (!target || !stream_is_open(target)) return 0;
-  return stream_write(target, buf, n);
+  cl_stream_t *t = ((synonym_impl_t *)s->impl)->cached;
+  if (!t || !stream_is_open(t)) return 0;
+  return stream_write(t, buf, n);
 }
 
 static bool syn_listen(cl_stream_t *s) {
-  synonym_impl_t *si = (synonym_impl_t *)s->impl;
-  if (!si || !si->symbol_name) return false;
-  emacs_env *env = cl_env();
-  if (!env) return false;
-  emacs_value sv = efuncall(env, "symbol-value", 1,
-                             (emacs_value[]){ eintern(env, si->symbol_name) });
-  cl_stream_t *target = euser_ptr_stream_get(env, sv);
-  if (!target) return false;
-  return stream_listen(target);
+  cl_stream_t *t = ((synonym_impl_t *)s->impl)->cached;
+  if (!t) return false;
+  return stream_listen(t);
 }
 
 static int syn_close(cl_stream_t *s) {
@@ -52,44 +39,25 @@ static int syn_close(cl_stream_t *s) {
 }
 
 static void syn_destroy(cl_stream_t *s) {
-  synonym_impl_t *si = (synonym_impl_t *)s->impl;
-  if (si) { free(si->symbol_name); free(si); }
+  free(s->impl);
 }
 
 static ptrdiff_t syn_file_position(cl_stream_t *s) {
-  synonym_impl_t *si = (synonym_impl_t *)s->impl;
-  if (!si || !si->symbol_name) return -1;
-  emacs_env *env = cl_env();
-  if (!env) return -1;
-  emacs_value sv = efuncall(env, "symbol-value", 1,
-                             (emacs_value[]){ eintern(env, si->symbol_name) });
-  cl_stream_t *target = euser_ptr_stream_get(env, sv);
-  if (!target) return -1;
-  return stream_file_position(target);
+  cl_stream_t *t = ((synonym_impl_t *)s->impl)->cached;
+  if (!t) return -1;
+  return stream_file_position(t);
 }
 
 static bool syn_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
-  synonym_impl_t *si = (synonym_impl_t *)s->impl;
-  if (!si || !si->symbol_name) return false;
-  emacs_env *env = cl_env();
-  if (!env) return false;
-  emacs_value sv = efuncall(env, "symbol-value", 1,
-                             (emacs_value[]){ eintern(env, si->symbol_name) });
-  cl_stream_t *target = euser_ptr_stream_get(env, sv);
-  if (!target) return false;
-  return stream_set_file_position(target, pos);
+  cl_stream_t *t = ((synonym_impl_t *)s->impl)->cached;
+  if (!t) return false;
+  return stream_set_file_position(t, pos);
 }
 
 static ptrdiff_t syn_file_length(cl_stream_t *s) {
-  synonym_impl_t *si = (synonym_impl_t *)s->impl;
-  if (!si || !si->symbol_name) return -1;
-  emacs_env *env = cl_env();
-  if (!env) return -1;
-  emacs_value sv = efuncall(env, "symbol-value", 1,
-                             (emacs_value[]){ eintern(env, si->symbol_name) });
-  cl_stream_t *target = euser_ptr_stream_get(env, sv);
-  if (!target) return -1;
-  return stream_file_length(target);
+  cl_stream_t *t = ((synonym_impl_t *)s->impl)->cached;
+  if (!t) return -1;
+  return stream_file_length(t);
 }
 
 static const cl_stream_ops_t synonym_stream_ops = {
@@ -105,14 +73,13 @@ static const cl_stream_ops_t synonym_stream_ops = {
   .file_length   = syn_file_length,
 };
 
-cl_stream_t *stream_create_synonym(const char *symbol_name) {
+cl_stream_t *stream_create_synonym(cl_stream_t *target) {
   synonym_impl_t *si = calloc(1, sizeof(*si));
   if (!si) return NULL;
-  si->symbol_name = strdup(symbol_name);
-  if (!si->symbol_name) { free(si); return NULL; }
+  si->cached = target;
 
   cl_stream_t *s = calloc(1, sizeof(*s));
-  if (!s) { free(si->symbol_name); free(si); return NULL; }
+  if (!s) { free(si); return NULL; }
 
   s->ops = &synonym_stream_ops;
   s->impl = si;
@@ -308,24 +275,22 @@ emacs_value Fmake_synonym_stream(emacs_env *env, ptrdiff_t nargs,
     signal_error(env, "cl-make-synonym-stream requires a symbol");
     return syms.v_nil;
   }
-  emacs_value sym_name = efuncall(env, "symbol-name", 1, &args[0]);
-  char *name = estrdup(env, sym_name);
-  if (!name) { signal_error(env, "Invalid symbol name"); return syms.v_nil; }
-  cl_stream_t *s = stream_create_synonym(name);
-  free(name);
+  /* look up the symbol's dynamic value to get the target stream */
+  emacs_value target_val = efuncall(env, "symbol-value", 1, &args[0]);
+  cl_stream_t *target = euser_ptr_stream_get(env, target_val);
+  if (!target) {
+    signal_error(env, "Synonym target is not a stream");
+    return syms.v_nil;
+  }
+  cl_stream_t *s = stream_create_synonym(target);
   if (!s) { signal_error(env, "Cannot create synonym stream"); return syms.v_nil; }
   return euser_ptr_stream_make(env, s);
 }
 
 emacs_value Fsynonym_stream_symbol(emacs_env *env, ptrdiff_t nargs,
                                     emacs_value *args, void *data) {
-  (void)data; (void)nargs;
-  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
-  if (!s) { signal_error(env, "Invalid stream"); return syms.v_nil; }
-  synonym_impl_t *si = (synonym_impl_t *)s->impl;
-  if (!si || !si->symbol_name)
-    { signal_error(env, "Not a synonym stream"); return syms.v_nil; }
-  return eintern(env, si->symbol_name);
+  (void)env; (void)nargs; (void)args; (void)data;
+  return syms.v_nil;
 }
 
 emacs_value Fmake_broadcast_stream(emacs_env *env, ptrdiff_t nargs,

@@ -37,6 +37,7 @@ typedef void      (*stream_clear_fn)(cl_stream_t *s);
 typedef ptrdiff_t (*stream_file_position_fn)(cl_stream_t *s);
 typedef bool      (*stream_set_file_position_fn)(cl_stream_t *s, ptrdiff_t pos);
 typedef ptrdiff_t (*stream_file_length_fn)(cl_stream_t *s);
+typedef void      (*stream_resolve_fn)(cl_stream_t *s);
 
 struct cl_stream_ops {
   stream_read_fn         read;
@@ -54,6 +55,7 @@ struct cl_stream_ops {
   stream_file_position_fn file_position;
   stream_set_file_position_fn set_file_position;
   stream_file_length_fn   file_length;
+  stream_resolve_fn       resolve;
 };
 
 /* ── core stream object ──────────────────────────────────────────────── */
@@ -144,7 +146,7 @@ cl_stream_t *stream_create_string_input(const char *data, size_t len);
 cl_stream_t *stream_create_string_output(size_t hint_size);
 cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
                                         ptrdiff_t start, ptrdiff_t end);
-cl_stream_t *stream_create_synonym(const char *symbol_name);
+cl_stream_t *stream_create_synonym(cl_stream_t *target);
 cl_stream_t *stream_create_broadcast(cl_stream_t **streams, ptrdiff_t count);
 cl_stream_t *stream_create_concatenated(cl_stream_t **streams, ptrdiff_t count);
 

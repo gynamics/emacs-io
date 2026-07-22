@@ -6,18 +6,15 @@
 
 #define LOCK(s)   pthread_mutex_lock(&(s)->mutex)
 #define UNLOCK(s) pthread_mutex_unlock(&(s)->mutex)
+#define RESOLVE(s) do { if ((s)->ops && (s)->ops->resolve) (s)->ops->resolve(s); } while (0)
 
 ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
   if (!s || !buf || n <= 0 || !s->ops || !s->ops->read) return 0;
   if (!atomic_load(&s->open)) return 0;
+  RESOLVE(s);
   LOCK(s);
 
-  /* drain pushback ring buffer first.
-     Only pushback chars are returned — even if fewer than n.
-     Callers that need a full buffer must loop (see cl-read-line).
-     Returning partial data preserves correct FIFO ordering for
-     unread/peek semantics.  Merging pushback + stream data in one
-     call would leak pushback chars past earlier-unread bytes. */
+  /* drain pushback ring buffer first */
   if (s->pushback_head != s->pushback_tail) {
     ptrdiff_t count = 0;
     unsigned char *dest = (unsigned char *)buf;
@@ -37,6 +34,7 @@ ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
 ptrdiff_t stream_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
   if (!s || !buf || n <= 0 || !s->ops || !s->ops->write) return 0;
   if (!atomic_load(&s->open)) return 0;
+  RESOLVE(s);
   LOCK(s);
   ptrdiff_t r = s->ops->write(s, buf, n);
 
@@ -59,6 +57,7 @@ ptrdiff_t stream_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
 int stream_close(cl_stream_t *s) {
   if (!s) return -1;
   if (!atomic_load(&s->open)) return 0;
+  RESOLVE(s);
   LOCK(s);
   int r = 0;
   if (s->ops && s->ops->close)
@@ -72,6 +71,7 @@ int stream_close(cl_stream_t *s) {
 int stream_flush(cl_stream_t *s) {
   if (!s || !s->ops || !s->ops->flush) return 0;
   if (!atomic_load(&s->open)) return 0;
+  RESOLVE(s);
   LOCK(s);
   int r = s->ops->flush(s);
   UNLOCK(s);
@@ -81,6 +81,7 @@ int stream_flush(cl_stream_t *s) {
 int stream_finish(cl_stream_t *s) {
   if (!s || !s->ops || !s->ops->finish) return 0;
   if (!atomic_load(&s->open)) return 0;
+  RESOLVE(s);
   LOCK(s);
   int r = s->ops->finish(s);
   UNLOCK(s);
@@ -90,6 +91,7 @@ int stream_finish(cl_stream_t *s) {
 bool stream_listen(cl_stream_t *s) {
   if (!s || !s->ops || !s->ops->listen) return false;
   if (!atomic_load(&s->open)) return false;
+  RESOLVE(s);
   LOCK(s);
   if (s->pushback_head != s->pushback_tail) { UNLOCK(s); return true; }
   bool r = s->ops->listen(s);
@@ -110,6 +112,7 @@ void stream_unread(cl_stream_t *s, int ch) {
 bool stream_direct(cl_stream_t *s, const void **addr, size_t *len) {
   if (!s || !s->ops || !s->ops->direct || !addr || !len) return false;
   if (!atomic_load(&s->open)) return false;
+  RESOLVE(s);
   LOCK(s);
   bool ok = s->ops->direct(s, addr, len);
   UNLOCK(s);
@@ -118,6 +121,7 @@ bool stream_direct(cl_stream_t *s, const void **addr, size_t *len) {
 
 void stream_advance(cl_stream_t *s, ptrdiff_t n) {
   if (!s || n <= 0 || !s->ops || !s->ops->advance) return;
+  RESOLVE(s);
   LOCK(s);
   s->ops->advance(s, n);
   UNLOCK(s);
@@ -127,15 +131,14 @@ ptrdiff_t stream_write_string(emacs_env *env, cl_stream_t *s, emacs_value str) {
   if (!s || !env) return 0;
   if (!atomic_load(&s->open)) return 0;
 
-  /* use optimized path if available */
   if (s->ops && s->ops->write_string) {
+    RESOLVE(s);
     LOCK(s);
     ptrdiff_t r = s->ops->write_string(env, s, str);
     UNLOCK(s);
     return r;
   }
 
-  /* fallback: extract C string then write bytes */
   ptrdiff_t slen = 0;
   if (!env->copy_string_contents(env, str, NULL, &slen)) return 0;
   if (slen == 0) return 0;
@@ -148,7 +151,7 @@ ptrdiff_t stream_write_string(emacs_env *env, cl_stream_t *s, emacs_value str) {
     free(buf);
     return -1;
   }
-  len--; /* exclude null */
+  len--;
 
   ptrdiff_t r = stream_write(s, buf, len);
   free(buf);
@@ -158,6 +161,7 @@ ptrdiff_t stream_write_string(emacs_env *env, cl_stream_t *s, emacs_value str) {
 ptrdiff_t stream_file_position(cl_stream_t *s) {
   if (!s || !s->ops || !s->ops->file_position) return -1;
   if (!atomic_load(&s->open)) return -1;
+  RESOLVE(s);
   LOCK(s);
   ptrdiff_t r = s->ops->file_position(s);
   UNLOCK(s);
@@ -167,6 +171,7 @@ ptrdiff_t stream_file_position(cl_stream_t *s) {
 bool stream_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
   if (!s || pos < 0 || !s->ops || !s->ops->set_file_position) return false;
   if (!atomic_load(&s->open)) return false;
+  RESOLVE(s);
   LOCK(s);
   bool r = s->ops->set_file_position(s, pos);
   UNLOCK(s);
@@ -175,6 +180,7 @@ bool stream_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
 
 ptrdiff_t stream_file_length(cl_stream_t *s) {
   if (!s || !s->ops || !s->ops->file_length) return -1;
+  RESOLVE(s);
   LOCK(s);
   ptrdiff_t r = s->ops->file_length(s);
   UNLOCK(s);
