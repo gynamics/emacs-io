@@ -125,14 +125,12 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 ### Log processing without temp buffers
 
 ```elisp
-(let ((s (cl-open "/var/log/app.log" :direction :input))
-      (out (cl-open "/tmp/errors.log" :direction :output :if-exists :supersede)))
-  (while (cl-listen s)
-    (let ((line (cl-read-line s nil nil)))
-      (when (and (car line) (string-match "ERROR" (car line)))
-        (cl-write-line (car line) out))))
-  (cl-close s)
-  (cl-close out))
+(cl-with-open-file (s "/var/log/app.log" :direction :input)
+  (cl-with-open-file (out "/tmp/errors.log" :direction :output :if-exists :supersede)
+    (while (cl-listen s)
+      (let ((line (cl-read-line s nil nil)))
+        (when (and (car line) (string-match "ERROR" (car line)))
+          (cl-write-line (car line) out))))))
 ```
 
 ### Fast sequence encoding
@@ -166,15 +164,55 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
       (when (cdr pair) (cl-close s) (cl-return)))))
 ```
 
-### Non-blocking pipe I/O
+### Buffer I/O — read and write to an Emacs buffer
 
 ```elisp
-(let ((s (cl-open "/tmp/worker.pipe" :direction :input)))
-  (while t
-    (when (cl-listen s)
-      (let ((line (cl-read-line s nil nil)))
-        (when (car line)
-          (process-message (car line)))))))
+(let ((buf (generate-new-buffer "*work*")))
+  (with-current-buffer buf (insert "HEADER\n"))
+  (let ((s (cl-make-buffer-io-stream buf)))
+    (cl-write-line "data1" s)      ;; inserts into buffer
+    (cl-write-line "data2" s)
+    (cl-close s))
+  (with-current-buffer buf
+    (buffer-string)))
+;; → "HEADER\ndata1\ndata2\n"
+```
+
+### Broadcast to multiple destinations
+
+```elisp
+(let ((log (cl-open "/tmp/out.log" :direction :output :if-exists :supersede))
+      (sos (cl-make-string-output-stream)))
+  (let ((bc (cl-make-broadcast-stream log sos)))
+    (cl-write-string "goes to both" bc)
+    (cl-close bc))
+  (cl-close log)
+  (cl-get-output-stream-string sos))
+;; → "goes to both"
+```
+
+### Two-way stream — separate read/write channels
+
+```elisp
+(let ((in  (cl-make-string-input-stream "request"))
+      (out (cl-make-string-output-stream)))
+  (let ((tw (cl-make-two-way-stream in out)))
+    (let ((req (cl-read-line tw)))
+      (cl-write-string (concat "echo: " (car req)) tw))
+    (cl-close tw))
+  (cl-get-output-stream-string out))
+;; → "echo: request"
+```
+
+### File truncation
+
+```elisp
+(let ((s (cl-open "/tmp/data.bin" :direction :io :if-exists :overwrite)))
+  (cl-write-string "abcdefgh" s)
+  (cl-ftruncate s 3)               ;; truncate to 3 bytes
+  (cl-file-position s 0)           ;; seek back to start
+  (cl-read-string 3 s))
+;; → "abc"
 ```
 
 ### Binary I/O
@@ -196,20 +234,14 @@ compares stream I/O against the most efficient Emacs native equivalent.
 
 | Test | Stream | Buffer | Speedup |
 |---|---|---|---|
-| `cl-read-sequence` 100 K elements | 2.3 ms | 33.4 ms | **14.7×** |
-| `cl-write-sequence` 100 K elements | 2.4 ms | 31.0 ms | **12.9×** |
-| File read/write 10 MB | 4.5 ms | 42.7 ms | **9.6×** |
-| File fd write 10 MB | 5.0 ms | 32.0 ms | **6.4×** |
-| Log grep 10 K lines | 1.6 ms | 4.8 ms | **3.0×** |
-| Comint incremental 10 K lines | 1.5 ms | 4.6 ms | **3.0×** |
-| Chunk read 1 MB | 0.3 ms | 0.6 ms | **2.4×** |
-| Accumulate + write to disk 10 MB | 17.4 ms | 37.6 ms | **2.2×** |
-| Per-char write 100 K | 18.1 ms | 34.2 ms | **1.9×** |
-| Line read 10 K lines | 2.1 ms | 3.3 ms | **1.6×** |
-| Bulk read 10 MB | 6.6 ms | 9.9 ms | **1.5×** |
-| Pipe read 10 MB | 5.9 ms | 8.1 ms | **1.4×** |
+| `cl-read-sequence` 100 K elements | 2.2 ms | 34.6 ms | **15.9×** |
+| `cl-write-sequence` 100 K elements | 2.5 ms | 31.8 ms | **12.9×** |
+| Log grep 10 K lines | 1.7 ms | 4.8 ms | **2.9×** |
+| Comint incremental 10 K lines | 1.6 ms | 4.7 ms | **2.9×** |
+| Per-char write 100 K | 19.5 ms | 35.5 ms | **1.8×** |
+| Line read 10 K lines | 2.0 ms | 3.3 ms | **1.6×** |
 
-Sequence I/O wins by **15×** by eliminating per-element C↔Lisp crossings:
+Sequence I/O wins by **16×** by eliminating per-element C↔Lisp crossings:
 a single C `memcpy` of 100 KB replaces 100,000 iterations of `(aset vec i
 (char-after ...))`.  File I/O wins by **10×** via raw `write(2)` bypassing
 `write-region` encoding and mode hooks.  Line processing uses a 4 KB
@@ -224,14 +256,16 @@ src/stream.c     — dispatch layer: lock, 256-slot pushback ring, call vtable
 src/fdstream.c   — POSIX fd I/O with 8 KB userspace ring buffers
 src/mmapstream.c — mmap-backed input for regular files (zero-copy reads)
 src/strstream.c  — string-input (cursor), string-output (block-chain)
-src/bufstream.c  — buffer input via buffer-substring-no-properties, 64 KB chunks
-src/reader.c     — cl-read-char, cl-read-line (CRLF-aware), bulk chunk read
+src/bufstream.c  — buffer input (snapshot), buffer output (insert), buffer I/O (bidirectional)
+src/reader.c     — cl-read-char, cl-read-line (CRLF-aware), bulk chunk read, read-delimited-list
 src/printer.c    — cl-write-*, terpri, fresh-line, flush/force/finish/clear
-src/fileio.c     — cl-open, cl-close, string/buffer constructors, predicates, file-position
-src/lispio.c     — cl-read (→ read-from-string), cl-prin1/princ/print
+src/fileio.c     — cl-open, cl-close, predicates, file-position, file-length, ftruncate
+src/lispio.c     — cl-read (→ read-from-string), cl-prin1/princ/print/pprint, cl-write
 src/stdstream.c  — standard stream variable init
-src/util.c/h     — emacs_env wrappers, defun, kw_eq, strbuf, error signaling
-src/emacs-io.c   — emacs_module_init, 40 defun registrations
+src/compstream.c — synonym, broadcast, concatenated, two-way, echo streams
+src/util.c/h     — emacs_env wrappers, defun, kw_eq, strbuf, error signaling, symbol cache
+src/emacs-io.c   — emacs_module_init, 68 defun registrations
+src/emacs-io-macros.el — cl-with-open-file, cl-with-open-stream macros
 ```
 
 Every I/O operation acquires a per-stream `pthread_mutex_t`.  Streams are
@@ -241,9 +275,15 @@ zero-copy reads from mmap and string-input streams.
 
 ## Notes
 
-- **Windows unsupported**: Targets Linux/BSD/macOS.  Uses `memfd_create`, `O_NONBLOCK`, `fsync`, `mmap`, `pthread`.
+- **Windows unsupported**: Linux/BSD/macOS.  Uses `memfd_create`, `O_NONBLOCK`, `fsync`, `mmap`, `pthread`, `ftruncate`.
+
+- **Buffer output streams**: byte-level writes (write-char, write-byte) are buffered in a strbuf and flushed to the target buffer on close or on the next string-write.  No data is lost.
+
+- **Synonym streams**: resolve the target stream once at construction and cache it.  Re-resolution per I/O (per CL spec) is not supported due to `emacs_env` boundary limitations.
 
 - **ERT byte-compiler quirk** (Emacs 31.0.90): `cl-fresh-line` and `cl-prin1` trigger `(invalid-function #<user-ptr ...>)` when called with a stream argument inside an `ert-deftest` body.  The functions work correctly in normal evaluation.  Tests for these use `*-to-string` variants.
+
+- **End-of-file condition**: EOF signals `(signal 'end-of-file ...)` — use `(condition-case ... (end-of-file ...))` to handle, not generic `error`.
 
 ## License
 
