@@ -16,6 +16,12 @@ extern emacs_value Fread_byte(emacs_env *env, ptrdiff_t nargs,
                                 emacs_value *args, void *data);
 extern emacs_value Fread_char_no_hang(emacs_env *env, ptrdiff_t nargs,
                                        emacs_value *args, void *data);
+extern emacs_value Fread_preserving_whitespace(emacs_env *env,
+                                                ptrdiff_t nargs,
+                                                emacs_value *args,
+                                                void *data);
+extern emacs_value Fread_delimited_list(emacs_env *env, ptrdiff_t nargs,
+                                         emacs_value *args, void *data);
 extern emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs,
                                emacs_value *args, void *data);
 extern emacs_value Funread_char(emacs_env *env, ptrdiff_t nargs,
@@ -86,6 +92,11 @@ extern emacs_value Ffile_position(emacs_env *env, ptrdiff_t nargs,
   extern emacs_value Ffile_length(emacs_env *env, ptrdiff_t nargs,
                                   emacs_value *args, void *data);
 
+  extern emacs_value Fstream_external_format(emacs_env *env, ptrdiff_t nargs,
+                                            emacs_value *args, void *data);
+extern emacs_value Finteractive_stream_p(emacs_env *env, ptrdiff_t nargs,
+                                          emacs_value *args, void *data);
+
 /* lispio.c */
 extern emacs_value Fread(emacs_env *env, ptrdiff_t nargs,
                           emacs_value *args, void *data);
@@ -105,6 +116,8 @@ extern emacs_value Fprinc_to_string(emacs_env *env, ptrdiff_t nargs,
                                      emacs_value *args, void *data);
 extern emacs_value Fwrite_to_string(emacs_env *env, ptrdiff_t nargs,
                                      emacs_value *args, void *data);
+extern emacs_value Fpprint(emacs_env *env, ptrdiff_t nargs,
+                            emacs_value *args, void *data);
 
 /* stdstream.c */
 extern void init_standard_streams(emacs_env *env);
@@ -385,6 +398,20 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "Return t if STREAM is connected to a terminal (isatty).\n"
         "\n(fn STREAM)", NULL);
 
+  defun(env, "cl-interactive-stream-p", Finteractive_stream_p, 1, 1,
+        "Return t if STREAM is an interactive stream.\n"
+        "\n"
+        "An interactive stream is one connected to a terminal\n"
+        "(i.e., isatty).\n"
+        "\n(fn STREAM)", NULL);
+
+  defun(env, "cl-stream-external-format", Fstream_external_format, 1, 1,
+        "Return the external format of STREAM.\n"
+        "\n"
+        "Currently always returns :default as encoding is not\n"
+        "implemented.\n"
+        "\n(fn STREAM)", NULL);
+
   defun(env, "cl-file-position", Ffile_position, 1, 3,
         "Return the current position of STREAM, or set it.\n"
         "\n"
@@ -423,6 +450,20 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "in the secondary return value (delegated to Emacs reader).\n"
          "\n(fn STRING &optional EOF-ERROR-P EOF-VALUE &key START END PRESERVE-WHITESPACE)", NULL);
 
+  defun(env, "cl-read-preserving-whitespace", Fread_preserving_whitespace, 0, 4,
+        "Read one Lisp object from STREAM, preserving trailing whitespace.\n"
+        "\n"
+        "Like `cl-read' but does not consume trailing whitespace.\n"
+        "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE RECURSIVE-P)", NULL);
+
+  defun(env, "cl-read-delimited-list", Fread_delimited_list, 1, 3,
+        "Read objects from STREAM until CHAR is seen, return as a list.\n"
+        "\n"
+        "CHAR is the delimiter character (an integer).\n"
+        "STREAM defaults to `*standard-input*'.\n"
+        "The delimiter is left on the stream (unread).\n"
+        "\n(fn CHAR &optional STREAM RECURSIVE-P)", NULL);
+
   defun(env, "cl-write", Fwrite, 1, 15,
         "Write OBJECT to STREAM.\n"
         "\n"
@@ -458,6 +499,13 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "\n"
         "STREAM defaults to `*standard-output*'.\n"
         "Returns OBJECT.\n"
+        "\n(fn OBJECT &optional STREAM)", NULL);
+
+  defun(env, "cl-pprint", Fpprint, 1, 2,
+        "Pretty-print OBJECT to STREAM.\n"
+        "\n"
+        "Delegates to Emacs' `pp-to-string' for formatting.\n"
+        "STREAM defaults to `*standard-output*'.\n"
         "\n(fn OBJECT &optional STREAM)", NULL);
 
   defun(env, "cl-prin1-to-string", Fprin1_to_string, 1, 1,

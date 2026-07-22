@@ -435,3 +435,25 @@ emacs_value Fwrite_to_string(emacs_env *env, ptrdiff_t nargs,
   stream_free(s);
   return result;
 }
+
+/* ── cl-pprint ─────────────────────────────────────────────────────────── */
+
+emacs_value Fpprint(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                     void *data) {
+  (void)data;
+  if (nargs < 1) {
+    signal_error(env, "cl-pprint requires 1 argument");
+    return syms.v_nil;
+  }
+
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 1, syms.var_sout);
+  if (!s || !stream_is_open(s)) {
+    signal_error(env, "cl-pprint: stream is closed");
+    return syms.v_nil;
+  }
+
+  /* use Emacs pp-to-string, then write to stream */
+  emacs_value pp_str = efuncall(env, "pp-to-string", 1, args);
+  stream_write_string(env, s, pp_str);
+  return args[0];
+}

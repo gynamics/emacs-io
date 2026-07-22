@@ -289,3 +289,19 @@ emacs_value Ffile_length(emacs_env *env, ptrdiff_t nargs,
   if (len < 0) return syms.v_nil;
   return eint(env, (intmax_t)len);
 }
+
+emacs_value Finteractive_stream_p(emacs_env *env, ptrdiff_t nargs,
+                                   emacs_value *args, void *data) {
+  (void)data; (void)nargs;
+  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
+  return stream_is_tty(s) ? syms.v_t : syms.v_nil;
+}
+
+emacs_value Fstream_external_format(emacs_env *env, ptrdiff_t nargs,
+                                     emacs_value *args, void *data) {
+  (void)data; (void)nargs;
+  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
+  if (!s) { signal_error(env, "Invalid stream"); return syms.v_nil; }
+  (void)s;
+  return eintern(env, ":default");
+}

@@ -690,6 +690,53 @@
                   (cl-write-sequence (list 72 101 108 108 111) stream))))
     (should (equal result "Hello"))))
 
+;; ── Stream Predicates & Introspection ───────────────────────────────────
+
+(ert-deftest emacs-io-test-interactive-stream-p ()
+  "Test cl-interactive-stream-p on a non-terminal file."
+  (emacs-io-test--with-temp-file f
+    (with-temp-file f (insert "test"))
+    (let ((s (cl-open f :direction :input)))
+      (should-not (cl-interactive-stream-p s))
+      (cl-close s))))
+
+(ert-deftest emacs-io-test-stream-external-format ()
+  "Test cl-stream-external-format."
+  (emacs-io-test--with-string-input "abc"
+    (should (eq (cl-stream-external-format stream) :default))))
+
+;; ── Read Preserving Whitespace ──────────────────────────────────────────
+
+(ert-deftest emacs-io-test-read-preserving-whitespace ()
+  "Test cl-read-preserving-whitespace."
+  (emacs-io-test--with-string-input "123  456"
+    (should (equal (cl-read-preserving-whitespace stream) 123))
+    (should (equal (cl-read-char stream) ?\ ))
+    (should (equal (cl-read stream) 456))))
+
+;; ── Read Delimited List ─────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-read-delimited-list ()
+  "Test cl-read-delimited-list."
+  (emacs-io-test--with-string-input "abcdefg"
+    (should (equal (cl-read-delimited-list ?d stream)
+                   '(?a ?b ?c)))
+    (should (equal (cl-read-char stream) ?d))))
+
+(ert-deftest emacs-io-test-read-delimited-list-delim-unread ()
+  "Test delimiter is left on stream after read-delimited-list."
+  (emacs-io-test--with-string-input "hello)"
+    (cl-read-delimited-list ?\) stream)
+    (should (equal (cl-read-char stream) ?\)))))
+
+;; ── Pretty Print ────────────────────────────────────────────────────────
+
+(ert-deftest emacs-io-test-pprint ()
+  "Test cl-pprint with a string output stream."
+  (let ((result (emacs-io-test--with-string-output
+                  (cl-pprint 42 stream))))
+    (should (string-match-p "\\`42" result))))
+
 (ert-deftest emacs-io-test-read-char-eof-error ()
   "Test cl-read-char signals error on EOF by default."
   (emacs-io-test--with-string-input "x"

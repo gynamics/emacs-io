@@ -385,3 +385,60 @@ emacs_value Fread_chunk(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   pair_args[1] = eof;
   return efuncall_cached(env, syms.fn_cons, 2, pair_args);
 }
+
+/* ── cl-read-preserving-whitespace ────────────────────────────────────
+   Like cl-read but preserves trailing whitespace.
+   Our cl-read already preserves whitespace (pushes back unconsumed bytes),
+   so this is effectively an alias. */
+
+emacs_value Fread_preserving_whitespace(emacs_env *env, ptrdiff_t nargs,
+                                         emacs_value *args, void *data) {
+  extern emacs_value Fread(emacs_env *, ptrdiff_t, emacs_value *, void *);
+  return Fread(env, nargs, args, data);
+}
+
+/* ── cl-read-delimited-list ───────────────────────────────────────────
+   (cl-read-delimited-list char &optional stream recursive-p)
+   Read objects from STREAM until CHAR is seen, return them as a list. */
+
+emacs_value Fread_delimited_list(emacs_env *env, ptrdiff_t nargs,
+                                  emacs_value *args, void *data) {
+  (void)data;
+  if (nargs < 1) {
+    signal_error(env, "cl-read-delimited-list requires at least 1 argument");
+    return syms.v_nil;
+  }
+
+  int delim = (int)eint_extract(env, args[0]);
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 1, syms.var_sin);
+  check_open(env, s, "cl-read-delimited-list");
+
+  /* build list in reverse, then reverse at end */
+  emacs_value lst = syms.v_nil;
+
+  for (;;) {
+    /* peek at next char */
+    if (!stream_listen(s)) break;
+    unsigned char ch;
+    ptrdiff_t r = stream_read(s, &ch, 1);
+    if (r <= 0) break;
+
+    if ((int)ch == delim) {
+      /* found delimiter — unread it (per CL spec) */
+      stream_unread(s, ch);
+      break;
+    }
+
+    /* push this character onto the front of the list */
+    emacs_value pair_args[2];
+    pair_args[0] = eint(env, ch);
+    pair_args[1] = lst;
+    lst = efuncall_cached(env, syms.fn_cons, 2, pair_args);
+  }
+
+  /* reverse the list */
+  emacs_value rev_args[1];
+  rev_args[0] = lst;
+  emacs_value result = efuncall(env, "reverse", 1, rev_args);
+  return result;
+}
