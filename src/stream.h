@@ -105,6 +105,8 @@ typedef struct {
   size_t         wsz;
   size_t         wlen;
   bool           owns_fd;
+  char          *path;     /* set by cl-open, for :abort cleanup; may be NULL */
+  bool           created;  /* true if cl-open created the file */
 } fd_stream_impl_t;
 
 #define FD_STREAM_RBUF_DEFAULT 8192
@@ -152,6 +154,12 @@ typedef struct {
 cl_stream_t *stream_alloc(const cl_stream_ops_t *ops, void *impl,
                           unsigned flags);
 
+/* Registry of live streams, so predicates can recognise emacs-io streams
+   (Emacs cannot otherwise tell one module's user-ptr from another's). */
+void stream_registry_add(cl_stream_t *s);
+void stream_registry_remove(cl_stream_t *s);
+bool stream_registered(cl_stream_t *s);
+
 cl_stream_t *stream_create_fd(int fd, bool owns_fd, unsigned flags);
 cl_stream_t *stream_create_mmap(int fd, bool owns_fd);
 cl_stream_t *stream_create_string_input(const char *data, size_t len);
@@ -169,6 +177,11 @@ cl_stream_t *stream_create_synonym(cl_stream_t *target, emacs_env *env,
 cl_stream_t *stream_create_concatenated(cl_stream_t **streams, ptrdiff_t count);
 cl_stream_t *stream_create_twoway(cl_stream_t *input, cl_stream_t *output);
 cl_stream_t *stream_create_echo(cl_stream_t *input, cl_stream_t *output);
+
+/* Advance the output column/last-char bookkeeping by N written bytes.
+   Used by the byte-write dispatch and by write_string implementations that
+   write directly (bypassing stream_write). */
+void stream_update_column(cl_stream_t *s, const unsigned char *p, ptrdiff_t n);
 
 ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n);
 ptrdiff_t stream_write(cl_stream_t *s, const void *buf, ptrdiff_t n);

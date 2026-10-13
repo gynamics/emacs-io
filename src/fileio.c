@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "emacs-module.h"
 #include "stream.h"
 #include "util.h"
@@ -95,8 +96,8 @@ static void parse_open_options(emacs_env *env, ptrdiff_t nargs,
 
 /* Fold :if-exists / :if-does-not-exist into the final open(2) flags.
    Returns false when the file should not be opened (the NIL cases). */
-static bool resolve_open_flags(const open_options_t *o, const char *filename,
-                               int *oflags_out) {
+static bool resolve_open_flags(emacs_env *env, const open_options_t *o,
+                               const char *filename, int *oflags_out) {
   int oflags = o->oflags;
 
   switch (o->if_exists) {
@@ -112,8 +113,15 @@ static bool resolve_open_flags(const open_options_t *o, const char *filename,
   case ACTION_ERROR:     oflags |= O_EXCL; break;
   case ACTION_OVERWRITE: oflags |= O_CREAT; break;
   default:
-    /* CL default: :output supersedes; :input/:io fall through to open(2) */
-    if (o->dir == OPEN_OUTPUT) oflags |= O_CREAT | O_TRUNC;
+    /* CL default is :error (versions are not supported): signal if the
+       file already exists and no :if-exists was supplied. */
+    if (o->dir == OPEN_OUTPUT || o->dir == OPEN_IO) {
+      struct stat st;
+      if (stat(filename, &st) == 0) {
+        signal_error(env, "File already exists (default :if-exists is :error)");
+        return false;
+      }
+    }
     break;
   }
 
@@ -184,18 +192,23 @@ emacs_value Fopen(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   int oflags;
-  if (!resolve_open_flags(&o, filename, &oflags)) {
+  if (!resolve_open_flags(env, &o, filename, &oflags)) {
     free(filename);
     return syms.v_nil;
   }
 
+  /* remember whether the file existed, so :abort can remove a file that
+     this call created */
+  struct stat st0;
+  bool existed_before = (stat(filename, &st0) == 0);
+
   int fd = open(filename, oflags, 0644);
   int saved_errno = errno;
-  free(filename);
 
   if (fd < 0) {
     char buf[256];
     snprintf(buf, sizeof(buf), "Cannot open file: %s", strerror(saved_errno));
+    free(filename);
     signal_error(env, buf);
     return syms.v_nil;
   }
@@ -203,9 +216,17 @@ emacs_value Fopen(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   cl_stream_t *s = make_file_stream(fd, oflags, &o);
   if (!s) {
     close(fd);
+    free(filename);
     signal_error(env, "Cannot create stream");
     return syms.v_nil;
   }
+
+  if (s->kind == CL_STREAM_KIND_FD && (oflags & O_CREAT) && !existed_before) {
+    fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
+    fi->path = strdup(filename);
+    fi->created = (fi->path != NULL);
+  }
+  free(filename);
 
   return euser_ptr_stream_make(env, s);
 }
@@ -241,9 +262,11 @@ emacs_value Fclose(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   /* :abort — discard output without flushing */
+  bool abort = false;
   for (ptrdiff_t i = 1; i < nargs - 1; i += 2) {
     if (kw_eq_cached(env, args[i], syms.k_abort) &&
         env->is_not_nil(env, args[i + 1])) {
+      abort = true;
       pthread_mutex_lock(&s->mutex);
       if (s->ops && s->ops->clear_output)
         s->ops->clear_output(s);
@@ -252,6 +275,13 @@ emacs_value Fclose(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   stream_close(s);
+
+  /* CL: with :abort, a file created by the stream's own open is deleted. */
+  if (abort && s->kind == CL_STREAM_KIND_FD) {
+    fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
+    if (fi && fi->created && fi->path)
+      unlink(fi->path);
+  }
   return syms.v_t;
 }
 
@@ -260,9 +290,14 @@ emacs_value Fclose(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 emacs_value Fstreamp(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                       void *data) {
   (void)data; (void)nargs;
-  if (env->is_not_nil(env, args[0]) && env->eq(env,
-        env->type_of(env, args[0]), eintern(env, "user-ptr")))
-    return syms.v_t;
+  emacs_value obj = args[0];
+  if (env->is_not_nil(env, obj) &&
+      env->eq(env, env->type_of(env, obj), eintern(env, "user-ptr"))) {
+    /* Only emacs-io's own streams count; other modules' user-ptrs must not
+       be mistaken for streams. */
+    cl_stream_t *s = euser_ptr_stream_get(env, obj);
+    return stream_registered(s) ? syms.v_t : syms.v_nil;
+  }
   return syms.v_nil;
 }
 
@@ -337,13 +372,29 @@ emacs_value Ffile_position(emacs_env *env, ptrdiff_t nargs,
   }
 
   if (nargs >= 2 && env->is_not_nil(env, args[1])) {
-    ptrdiff_t pos = (ptrdiff_t)eint_extract(env, args[1]);
+    /* position-spec: an integer, or the :START / :END designators */
+    ptrdiff_t pos;
+    if (kw_eq_cached(env, args[1], syms.k_start)) {
+      pos = 0;
+    } else if (kw_eq_cached(env, args[1], syms.k_end)) {
+      pos = stream_file_length(s);
+      if (pos < 0) {
+        signal_error(env, "cl-file-position: cannot determine end position");
+        return syms.v_nil;
+      }
+    } else {
+      pos = (ptrdiff_t)eint_extract(env, args[1]);
+    }
     if (pos < 0) {
       signal_error(env, "cl-file-position: position must be non-negative");
       return syms.v_nil;
     }
-    return stream_set_file_position(s, pos)
-           ? syms.v_t : syms.v_nil;
+    if (!stream_set_file_position(s, pos)) {
+      /* CL: a too-large or otherwise inappropriate position is an error. */
+      signal_error(env, "cl-file-position: inappropriate position");
+      return syms.v_nil;
+    }
+    return syms.v_t;
   }
 
   ptrdiff_t pos = stream_file_position(s);

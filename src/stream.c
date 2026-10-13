@@ -8,6 +8,48 @@
 #define UNLOCK(s) pthread_mutex_unlock(&(s)->mutex)
 #define RESOLVE(s) do { if ((s)->ops && (s)->ops->resolve) (s)->ops->resolve(s); } while (0)
 
+/* ── live-stream registry ────────────────────────────────────────────── */
+
+static pthread_mutex_t registry_mutex = PTHREAD_MUTEX_INITIALIZER;
+static cl_stream_t **registry;
+static size_t registry_len, registry_cap;
+
+void stream_registry_add(cl_stream_t *s) {
+  if (!s) return;
+  pthread_mutex_lock(&registry_mutex);
+  if (registry_len == registry_cap) {
+    size_t ncap = registry_cap ? registry_cap * 2 : 16;
+    cl_stream_t **n = realloc(registry, ncap * sizeof(*n));
+    if (n) { registry = n; registry_cap = ncap; }
+  }
+  if (registry_len < registry_cap)
+    registry[registry_len++] = s;
+  pthread_mutex_unlock(&registry_mutex);
+}
+
+void stream_registry_remove(cl_stream_t *s) {
+  if (!s) return;
+  pthread_mutex_lock(&registry_mutex);
+  for (size_t i = 0; i < registry_len; i++) {
+    if (registry[i] == s) {
+      registry[i] = registry[--registry_len];
+      break;
+    }
+  }
+  pthread_mutex_unlock(&registry_mutex);
+}
+
+bool stream_registered(cl_stream_t *s) {
+  if (!s) return false;
+  bool found = false;
+  pthread_mutex_lock(&registry_mutex);
+  for (size_t i = 0; i < registry_len; i++) {
+    if (registry[i] == s) { found = true; break; }
+  }
+  pthread_mutex_unlock(&registry_mutex);
+  return found;
+}
+
 /* ── construction ────────────────────────────────────────────────────── */
 
 cl_stream_t *stream_alloc(const cl_stream_ops_t *ops, void *impl,
@@ -19,6 +61,7 @@ cl_stream_t *stream_alloc(const cl_stream_ops_t *ops, void *impl,
   s->flags = flags;
   atomic_init(&s->open, true);
   pthread_mutex_init(&s->mutex, NULL);
+  stream_registry_add(s);
   return s;
 }
 
@@ -47,7 +90,7 @@ ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
 
 /* Advance the output column/last-char bookkeeping by N written bytes,
    restarting the column count after the last newline (for cl-fresh-line). */
-static void update_column(cl_stream_t *s, const unsigned char *p, ptrdiff_t n) {
+void stream_update_column(cl_stream_t *s, const unsigned char *p, ptrdiff_t n) {
   ptrdiff_t after_nl = 0;
   bool found_nl = false;
   for (ptrdiff_t i = n - 1; i >= 0; i--) {
@@ -64,7 +107,7 @@ ptrdiff_t stream_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
   LOCK(s);
   ptrdiff_t r = s->ops->write(s, buf, n);
   if (r > 0)
-    update_column(s, (const unsigned char *)buf, r);
+    stream_update_column(s, (const unsigned char *)buf, r);
   UNLOCK(s);
   return r;
 }

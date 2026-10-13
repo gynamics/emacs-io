@@ -82,9 +82,15 @@ static bool read_object_from_stream(emacs_env *env, cl_stream_t *s,
   }
 }
 
-emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
-                  void *data) {
-  (void)data;
+static bool read_ws_byte(char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+}
+
+/* Shared by cl-read and cl-read-preserving-whitespace.  With PRESERVE_WS
+   false, the single whitespace character that delimits the object is
+   discarded, as CL's reader does; with true it is pushed back. */
+static emacs_value read_form(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                             bool preserve_ws) {
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
   if (!s || !stream_is_open(s)) {
     signal_error(env, "cl-read: stream is closed");
@@ -109,12 +115,29 @@ emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     return syms.v_nil;
   }
 
-  /* return unconsumed bytes to the stream */
-  for (ptrdiff_t i = consumed; i < (ptrdiff_t)sb->len; i++)
+  /* Push back the unconsumed bytes; when not preserving whitespace, drop
+     the one delimiting whitespace character first. */
+  ptrdiff_t first = consumed;
+  if (!preserve_ws && first < (ptrdiff_t)sb->len &&
+      read_ws_byte(sb->data[first]))
+    first++;
+  for (ptrdiff_t i = first; i < (ptrdiff_t)sb->len; i++)
     stream_unread(s, (unsigned char)sb->data[i]);
 
   strbuf_free(sb);
   return result;
+}
+
+emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                  void *data) {
+  (void)data;
+  return read_form(env, nargs, args, false);
+}
+
+emacs_value Fread_preserving_whitespace(emacs_env *env, ptrdiff_t nargs,
+                                         emacs_value *args, void *data) {
+  (void)data;
+  return read_form(env, nargs, args, true);
 }
 
 /* ── cl-read-from-string ─────────────────────────────────────────────── */
@@ -170,15 +193,12 @@ emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
     return syms.v_nil;
   }
 
-  /* strip trailing whitespace unless :preserve-whitespace */
-  if (pos > 0 && !preserve_ws) {
-    const char *base = str + start;
-    while (pos > 0 &&
-           (base[pos - 1] == ' '  || base[pos - 1] == '\t' ||
-            base[pos - 1] == '\n' || base[pos - 1] == '\r' ||
-            base[pos - 1] == '\f'))
-      pos--;
-  }
+  /* Unless :preserve-whitespace, consume the single whitespace character
+     that delimits the object (as CL's reader does), so POSITION matches
+     CLHS: (read-from-string " 1 3 5" t nil :start 2) => 3, 5. */
+  if (!preserve_ws && pos < end - start &&
+      read_ws_byte(str[start + pos]))
+    pos++;
   free(str);
 
   emacs_value cons_args[2];
@@ -190,8 +210,9 @@ emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
 /* ── cl-write ─────────────────────────────────────────────────────────── */
 
 /* CL print-control keywords cl-write accepts, each paired with the Emacs
-   variable it should temporarily bind during printing. */
-#define N_PRINT_CONTROLS 11
+   variable it should temporarily bind during printing.  :escape and
+   :readably have no Emacs variable and are handled separately below. */
+#define N_PRINT_CONTROLS 9
 
 emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                     void *data) {
@@ -203,9 +224,9 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   emacs_value obj = args[0];
   cl_stream_t *s = NULL;
+  bool escape_present = false, escape_value = false;
 
   const struct { emacs_value key; const char *var; } controls[N_PRINT_CONTROLS] = {
-    { syms.k_escape,   "print-escape"   },
     { syms.k_radix,    "print-radix"    },
     { syms.k_base,     "print-base"     },
     { syms.k_circle,   "print-circle"   },
@@ -215,7 +236,6 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     { syms.k_case,     "print-case"     },
     { syms.k_gensym,   "print-gensym"   },
     { syms.k_array,    "print-array"    },
-    { syms.k_readably, "print-readably" },
   };
 
   emacs_value values[N_PRINT_CONTROLS];
@@ -230,6 +250,13 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       s = euser_ptr_stream_get(env, args[i + 1]);
       continue;
     }
+    if (kw_eq_cached(env, key, syms.k_escape)) {
+      escape_present = true;
+      escape_value = env->is_not_nil(env, args[i + 1]);
+      continue;
+    }
+    /* :readably is accepted for compatibility and ignored (Emacs' printer
+       never signals print-not-readable). */
     for (int j = 0; j < N_PRINT_CONTROLS; j++) {
       if (kw_eq_cached(env, key, controls[j].key)) {
         values[j] = args[i + 1];
@@ -248,7 +275,16 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     efuncall_cached(env, syms.fn_set, 2, a);
   }
 
-  emacs_value str = efuncall_cached(env, syms.fn_prin1_to_string, 1, &obj);
+  /* Emacs has no `print-escape'; emulate it via prin1 (escaped) vs the
+     princ-style `(format "%s" obj)' (unescaped). */
+  emacs_value str;
+  if (escape_present && !escape_value) {
+    emacs_value fmt = estring(env, "%s");
+    emacs_value fa[2] = { fmt, obj };
+    str = efuncall(env, "format", 2, fa);
+  } else {
+    str = efuncall_cached(env, syms.fn_prin1_to_string, 1, &obj);
+  }
 
   /* restore */
   for (int j = 0; j < N_PRINT_CONTROLS; j++) {
@@ -258,9 +294,18 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     efuncall_cached(env, syms.fn_set, 2, a);
   }
 
-  if (s && stream_is_open(s))
-    stream_write_string(env, s, str);
+  /* CL: :stream defaults to *standard-output* */
+  if (!s) {
+    emacs_value sout = efuncall_cached(env, syms.fn_symbol_value, 1,
+                                       (emacs_value[]){ syms.var_sout });
+    s = euser_ptr_stream_get(env, sout);
+  }
+  if (!s || !stream_is_open(s)) {
+    signal_error(env, "cl-write: stream is closed");
+    return syms.v_nil;
+  }
 
+  stream_write_string(env, s, str);
   return obj;
 }
 
@@ -416,8 +461,9 @@ emacs_value Fpprint(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     return syms.v_nil;
   }
 
-  /* use Emacs pp-to-string, then write to stream */
+  /* use Emacs pp-to-string, then write to stream.
+     CL: pprint returns no values; a subr cannot, so return nil. */
   emacs_value pp_str = efuncall(env, "pp-to-string", 1, args);
   stream_write_string(env, s, pp_str);
-  return args[0];
+  return syms.v_nil;
 }

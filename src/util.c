@@ -7,7 +7,12 @@
 /* ── runtime pointer ──────────────────────────────────────────────────── */
 
 struct emacs_runtime *cl_rt;
-emacs_env *cl_env(void) { return cl_rt ? cl_rt->get_environment(cl_rt) : NULL; }
+
+/* The env passed to the currently-executing subr.  Modules must not call
+   runtime->get_environment from inside a subr, so the registered-function
+   trampoline below (see defun) stashes the valid env here instead. */
+static emacs_env *cl_cur_env;
+emacs_env *cl_env(void) { return cl_cur_env; }
 
 /* ── emacs_env helpers ────────────────────────────────────────────────── */
 
@@ -68,9 +73,29 @@ intmax_t eint_extract(emacs_env *env, emacs_value v) {
 
 /* ── defun registration ───────────────────────────────────────────────── */
 
+/* Every registered subr goes through this trampoline, which records the
+   env Emacs passed to the call so that cl_env() can return it.  The real
+   subr function is smuggled through the `data' pointer (a union avoids the
+   ISO C function-pointer/object-pointer cast). */
+union cl_subr_slot { emacs_subr_fn fn; void *ptr; };
+
+static emacs_value subr_entry(emacs_env *env, ptrdiff_t nargs,
+                              emacs_value *args, void *data) {
+  union cl_subr_slot slot;
+  slot.ptr = data;
+  emacs_env *saved = cl_cur_env;
+  cl_cur_env = env;
+  emacs_value result = slot.fn(env, nargs, args, NULL);
+  cl_cur_env = saved;
+  return result;
+}
+
 void defun(emacs_env *env, const char *name, emacs_subr_fn fn,
            ptrdiff_t min, ptrdiff_t max, const char *doc, void *data) {
-  emacs_value f = env->make_function(env, min, max, fn, doc, data);
+  (void)data;
+  union cl_subr_slot slot;
+  slot.fn = fn;
+  emacs_value f = env->make_function(env, min, max, subr_entry, doc, slot.ptr);
   emacs_value args[2];
   args[0] = eintern(env, name);
   args[1] = f;

@@ -94,22 +94,22 @@
 (ert-deftest emacs-io-test-string-input-read-line ()
   "Test reading lines from a string input stream."
   (emacs-io-test--with-string-input "line1\nline2\nline3"
-    (should (equal (cl-read-line stream) '("line1" nil)))
-    (should (equal (cl-read-line stream) '("line2" nil)))
-    (should (equal (cl-read-line stream) '("line3" t)))))
+    (should (equal (cl-read-line stream) '("line1")))
+    (should (equal (cl-read-line stream) '("line2")))
+    (should (equal (cl-read-line stream) '("line3" . t)))))
 
 (ert-deftest emacs-io-test-string-input-read-line-crlf ()
   "Test reading lines from CRLF input."
   (emacs-io-test--with-string-input "a\r\nb\r\nc"
-    (should (equal (cl-read-line stream) '("a" nil)))
-    (should (equal (cl-read-line stream) '("b" nil)))
-    (should (equal (cl-read-line stream) '("c" t)))))
+    (should (equal (cl-read-line stream) '("a")))
+    (should (equal (cl-read-line stream) '("b")))
+    (should (equal (cl-read-line stream) '("c" . t)))))
 
 (ert-deftest emacs-io-test-string-input-read-line-eof ()
   "Test read-line handling of EOF."
   (emacs-io-test--with-string-input "single"
-    (should (equal (cl-read-line stream) '("single" t)))
-    (should (equal (cl-read-line stream nil 'eof) 'eof))))
+    (should (equal (cl-read-line stream) '("single" . t)))
+    (should (equal (cl-read-line stream nil 'eof) '(eof . t)))))
 
 (ert-deftest emacs-io-test-string-input-read-byte ()
   "Test reading bytes from a string input stream."
@@ -132,9 +132,10 @@
     (should (equal (cl-read-char stream) ?x))))
 
 (ert-deftest emacs-io-test-peek-char-skip-to-char ()
-  "Test cl-peek-char with character peek-type."
-  (emacs-io-test--with-string-input "aaaab"
-    (should (equal (cl-peek-char ?a stream) ?b))
+  "Test cl-peek-char with character peek-type.
+CL: skip characters until CHAR is found, then leave CHAR in the stream."
+  (emacs-io-test--with-string-input "xyb"
+    (should (equal (cl-peek-char ?b stream) ?b))
     (should (equal (cl-read-char stream) ?b))))
 
 (ert-deftest emacs-io-test-string-input-listen ()
@@ -228,7 +229,7 @@
       (insert "hello world"))
     (let ((stream (cl-open fname :direction :input)))
       (unwind-protect
-          (should (equal (cl-read-line stream) '("hello world" t)))
+          (should (equal (cl-read-line stream) '("hello world" . t)))
         (cl-close stream)))))
 
 (ert-deftest emacs-io-test-file-open-write-and-read ()
@@ -242,8 +243,8 @@
     (let ((in (cl-open fname :direction :input)))
       (unwind-protect
           (progn
-            (should (equal (cl-read-line in) '("line one" nil)))
-            (should (equal (cl-read-line in) '("line two" nil)))
+            (should (equal (cl-read-line in) '("line one")))
+            (should (equal (cl-read-line in) '("line two")))
         (cl-close in))))))
 
 (ert-deftest emacs-io-test-file-open-close ()
@@ -625,7 +626,7 @@
       (let ((result (cl-read-line stream)))
         (should (equal (length (car result)) 5000))
         (should (equal (car result) (make-string 5000 ?x)))
-        (should (equal (cl-read-line stream) '("rest" t)))))))
+        (should (equal (cl-read-line stream) '("rest" . t)))))))
 
 ;; ── mixed output types ────────────────────────────────────────────────────
 
@@ -644,7 +645,7 @@
   "Test reading from an empty string stream."
   (emacs-io-test--with-string-input ""
     (should (equal (cl-read-char stream nil :eof) :eof))
-    (should (equal (cl-read-line stream nil :eof) :eof))
+    (should (equal (cl-read-line stream nil :eof) '(:eof . t)))
     (should (equal (cl-read-byte stream nil :eof) :eof))
     (should (equal (cl-read stream nil :eof) :eof))))
 
@@ -855,9 +856,9 @@
     (should (equal (cl-read-char stream) ?b))))
 
 (ert-deftest emacs-io-test-file-position-string-input-out-of-range ()
-  "Test cl-file-position set out of range returns nil."
+  "Test cl-file-position set out of range signals an error (CL)."
   (emacs-io-test--with-string-input "abc"
-    (should-not (cl-file-position stream 10))
+    (should-error (cl-file-position stream 10))
     (should (equal (cl-file-position stream) 0))))
 
 (ert-deftest emacs-io-test-file-position-string-output ()
@@ -1016,9 +1017,10 @@
     (cl-close sin) (cl-close sout)))
 
 (ert-deftest emacs-io-test-read-char-no-hang ()
-  "Test cl-read-char-no-hang returns nil when no data available."
+  "Test cl-read-char-no-hang.
+A non-interactive stream at EOF signals (CL); data available returns it."
   (emacs-io-test--with-string-input ""
-    (should (eq (cl-read-char-no-hang stream) nil)))
+    (should-error (cl-read-char-no-hang stream) :type 'end-of-file))
   (emacs-io-test--with-string-input "x"
     (should (equal (cl-read-char-no-hang stream) ?x))))
 
@@ -1100,7 +1102,7 @@
       (should (cl-ftruncate s 3))
       (should (equal (cl-file-length s) 3))
       (should (cl-file-position s 0))
-      (should (equal (cl-read-line s) '("abc" t)))
+      (should (equal (cl-read-line s) '("abc" . t)))
       (cl-close s))))
 
 (provide 'emacs-io-test)

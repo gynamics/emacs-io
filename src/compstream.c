@@ -49,16 +49,33 @@ static emacs_value streams_to_list(emacs_env *env, cl_stream_t **streams,
 }
 
 /* ── synonym stream ────────────────────────────────────────────────────
-   The target stream is resolved once at construction using the
-   constructor's valid emacs_env, then cached.  The vtable ops
-   forward to the cached target.  Re-resolution on each I/O (per CL
-   spec) would require calling Emacs Lisp outside the mutex, which
-   is not currently supported by the dispatch layer. */
+   The target stream is re-resolved from the symbol's current value before
+   each operation, via the vtable `resolve' hook that the dispatch layer
+   calls (outside the stream mutex).  This matches CL, where rebinding the
+   symbol is reflected immediately. */
 
 typedef struct {
   cl_stream_t  *cached;
   emacs_value   symbol;    /* global-ref'd symbol, for accessor */
 } synonym_impl_t;
+
+/* Re-resolve the cached target from the symbol's current value. */
+static void syn_resolve(cl_stream_t *s) {
+  synonym_impl_t *si = (synonym_impl_t *)s->impl;
+  if (!si || !si->symbol) return;
+  emacs_env *env = cl_env();
+  if (!env) return;
+
+  emacs_value val = efuncall_cached(env, syms.fn_symbol_value, 1, &si->symbol);
+  if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
+    env->non_local_exit_clear(env);   /* unbound: keep the cached target */
+    return;
+  }
+  if (!env->eq(env, env->type_of(env, val), eintern(env, "user-ptr")))
+    return;                           /* not a stream: keep the cached target */
+  cl_stream_t *t = euser_ptr_stream_get(env, val);
+  if (t) si->cached = t;
+}
 
 static cl_stream_t *syn_target(cl_stream_t *s) {
   return ((synonym_impl_t *)s->impl)->cached;
@@ -121,6 +138,7 @@ static const cl_stream_ops_t synonym_stream_ops = {
   .file_position = syn_file_position,
   .set_file_position = syn_set_file_position,
   .file_length   = syn_file_length,
+  .resolve       = syn_resolve,
 };
 
 cl_stream_t *stream_create_synonym(cl_stream_t *target, emacs_env *env,
@@ -170,11 +188,7 @@ static ptrdiff_t bcast_write_string(emacs_env *env, cl_stream_t *s,
 }
 
 static int bcast_close(cl_stream_t *s) {
-  broadcast_impl_t *bc = (broadcast_impl_t *)s->impl;
-  if (bc) {
-    for (ptrdiff_t i = 0; i < bc->count; i++)
-      stream_close(bc->streams[i]);
-  }
+  /* CL: closing a constructed stream does not close its constituents. */
   atomic_store(&s->open, false);
   return 0;
 }
@@ -254,11 +268,7 @@ static bool concat_listen(cl_stream_t *s) {
 }
 
 static int concat_close(cl_stream_t *s) {
-  concat_impl_t *ci = (concat_impl_t *)s->impl;
-  if (ci) {
-    for (ptrdiff_t i = 0; i < ci->count; i++)
-      stream_close(ci->streams[i]);
-  }
+  /* CL: closing a constructed stream does not close its constituents. */
   atomic_store(&s->open, false);
   return 0;
 }
@@ -341,9 +351,7 @@ static bool dx_listen(cl_stream_t *s) {
 }
 
 static int dx_close(cl_stream_t *s) {
-  duplex_impl_t *d = (duplex_impl_t *)s->impl;
-  if (d->input)  stream_close(d->input);
-  if (d->output) stream_close(d->output);
+  /* CL: closing a constructed stream does not close its constituents. */
   atomic_store(&s->open, false);
   return 0;
 }
@@ -485,7 +493,9 @@ emacs_value Fconcatenated_stream_streams(emacs_env *env, ptrdiff_t nargs,
                                      "Not a concatenated stream");
   if (!s) return syms.v_nil;
   concat_impl_t *ci = (concat_impl_t *)s->impl;
-  return streams_to_list(env, ci->streams, ci->count);
+  /* CL: only the streams still to be read, starting with the current one. */
+  return streams_to_list(env, ci->streams + ci->current,
+                         ci->count - ci->current);
 }
 
 emacs_value Fmake_two_way_stream(emacs_env *env, ptrdiff_t nargs,

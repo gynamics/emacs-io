@@ -4,8 +4,37 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 
 /* ── helpers ──────────────────────────────────────────────────────────── */
+
+/* Encode code point CP as UTF-8 into BUF (>= 4 bytes); return byte count. */
+static int utf8_encode(uint32_t cp, unsigned char *buf) {
+  if (cp < 0x80) {
+    buf[0] = (unsigned char)cp;
+    return 1;
+  }
+  if (cp < 0x800) {
+    buf[0] = (unsigned char)(0xC0 | (cp >> 6));
+    buf[1] = (unsigned char)(0x80 | (cp & 0x3F));
+    return 2;
+  }
+  if (cp < 0x10000) {
+    buf[0] = (unsigned char)(0xE0 | (cp >> 12));
+    buf[1] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+    buf[2] = (unsigned char)(0x80 | (cp & 0x3F));
+    return 3;
+  }
+  if (cp <= 0x10FFFF) {
+    buf[0] = (unsigned char)(0xF0 | (cp >> 18));
+    buf[1] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
+    buf[2] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+    buf[3] = (unsigned char)(0x80 | (cp & 0x3F));
+    return 4;
+  }
+  buf[0] = (unsigned char)(cp & 0xFF);  /* Emacs raw byte */
+  return 1;
+}
 
 /* ── cl-write-char ────────────────────────────────────────────────────── */
 
@@ -21,8 +50,10 @@ emacs_value Fwrite_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 1, syms.var_sout);
   check_open(env, s, "cl-write-char");
 
-  unsigned char b = (unsigned char)(ch & 0xFF);
-  stream_write(s, &b, 1);
+  /* Write the character as UTF-8, consistent with cl-write-string. */
+  unsigned char buf[4];
+  int n = utf8_encode((uint32_t)ch, buf);
+  stream_write(s, buf, n);
   return args[0];
 }
 
@@ -232,8 +263,12 @@ emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       end = eint_extract(env, args[i + 1]);
   }
 
-  if (start < 0) start = 0;
-  if ((is_vec || is_str) && end > len) end = len;
+  /* CL: start and end must be valid bounding indices. */
+  if (start < 0 || end < 0 || end < start ||
+      ((is_vec || is_str) && (start > len || end > len))) {
+    signal_error(env, "cl-write-sequence: invalid bounding index");
+    return syms.v_nil;
+  }
   ptrdiff_t count = end - start;
   if (count <= 0) return seq;
 

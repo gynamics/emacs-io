@@ -12,6 +12,7 @@ OBJS     = $(SRC)/emacs-io.o $(SRC)/util.o $(SRC)/stream.o $(SRC)/fdstream.o \
            $(SRC)/stdstream.o $(SRC)/reader.o $(SRC)/printer.o \
            $(SRC)/fileio.o $(SRC)/lispio.o $(SRC)/compstream.o
 TEST     = $(TST)/emacs-io-test.el
+CONF     = $(TST)/emacs-io-conformance-test.el
 BENCH    = bench/emacs-io-perf-test.el
 
 .PHONY: all clean check verify test bench
@@ -25,7 +26,7 @@ $(SRC)/%.o: $(SRC)/%.c $(SRC)/stream.h $(SRC)/util.h Makefile
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(TARGET) $(OBJS) $(TEST:.el=.elc) $(BENCH:.el=.elc)
+	rm -f $(TARGET) $(OBJS) $(TEST:.el=.elc) $(CONF:.el=.elc) $(BENCH:.el=.elc)
 
 check: $(TARGET)
 	@echo "Module:   $(TARGET)"
@@ -33,17 +34,17 @@ check: $(TARGET)
 	@echo "Exports:  $$(nm -D $(TARGET) | grep ' T ' | grep -E '^[0-9a-f]+ T (F|cl_|e)' | wc -l) symbols"
 	@echo ""
 	@echo "Targets:"
-	@echo "  make test     — 46 functional correctness tests (one per interface)"
-	@echo "  make bench    —  8 performance / scale tests"
+	@echo "  make test     — unit tests + Common Lisp conformance tests"
+	@echo "  make bench    — performance / scale tests"
 
 verify: $(TARGET)
 	@$(EMACS) --batch -Q --eval '(module-load "$(CURDIR)/$(TARGET)")' \
 		--eval '(message "emacs-io %d functions loaded" (length (apropos-internal "^cl-" (function fboundp))))'
 
 test: $(TARGET)
-	@rm -f $(TEST:.el=.elc)
+	@rm -f $(TEST:.el=.elc) $(CONF:.el=.elc)
 	@echo "=== unit tests ==="
-	@$(EMACS) --batch -Q -L $(SRC) -L $(TST) -l $(TEST) -f ert-run-tests-batch-and-exit
+	@$(EMACS) --batch -Q -L $(SRC) -L $(TST) -l $(TEST) -l $(CONF) -f ert-run-tests-batch-and-exit
 
 bench: $(TARGET)
 	@rm -f $(BENCH:.el=.elc)

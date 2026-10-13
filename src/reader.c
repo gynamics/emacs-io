@@ -94,9 +94,19 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     }
   }
 
+  /* CL returns two values (line, missing-newline-p).  Elisp has no multiple
+     values, so a dotted pair (line . missing-newline-p) is returned. */
   if (sb->len == 0 && !saw_newline) {
+    /* immediate EOF: (eof-value . t), or signal when eof-error-p is true */
     strbuf_free(sb);
-    return read_eof(env, s, nargs, args);
+    if (nargs >= 2 && !env->is_not_nil(env, args[1])) {
+      emacs_value eof_pair[2];
+      eof_pair[0] = (nargs >= 3) ? args[2] : syms.v_nil;
+      eof_pair[1] = syms.v_t;
+      return efuncall_cached(env, syms.fn_cons, 2, eof_pair);
+    }
+    signal_end_of_file(env, s);
+    return syms.v_nil;
   }
 
   emacs_value line = strbuf_to_estring(env, sb);
@@ -105,7 +115,7 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   emacs_value cons_args[2];
   cons_args[0] = line;
   cons_args[1] = saw_newline ? syms.v_nil : syms.v_t;
-  return efuncall_cached(env, syms.fn_list, 2, cons_args);
+  return efuncall_cached(env, syms.fn_cons, 2, cons_args);
 }
 
 /* ── cl-read-byte ─────────────────────────────────────────────────────── */
@@ -132,20 +142,21 @@ emacs_value Fread_char_no_hang(emacs_env *env, ptrdiff_t nargs,
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
   check_open(env, s, "cl-read-char-no-hang");
 
+  /* On an interactive stream, "no character available" means it would block
+     -> nil.  On a non-interactive stream it means end of file, which the
+     usual eof-error-p / eof-value handling applies to (CL). */
+  bool interactive = (s->flags & CL_STREAM_FLAG_INTERACTIVE) != 0;
+
   if (!stream_listen(s)) {
-    if (nargs >= 2 && !env->is_not_nil(env, args[1]))
-      return (nargs >= 3) ? args[2] : syms.v_nil;
-    return syms.v_nil;
+    if (interactive) return syms.v_nil;
+    return read_eof(env, s, nargs, args);
   }
 
   unsigned char ch;
   ptrdiff_t r = stream_read(s, &ch, 1);
   if (r <= 0) {
-    if (nargs >= 2 && !env->is_not_nil(env, args[1]))
-      return (nargs >= 3) ? args[2] : syms.v_nil;
-    if (nargs >= 2 && env->is_not_nil(env, args[1]))
-      { signal_end_of_file(env, s); return syms.v_nil; }
-    return syms.v_nil;
+    if (interactive) return syms.v_nil;
+    return read_eof(env, s, nargs, args);
   }
   return eint(env, ch);
 }
@@ -156,19 +167,29 @@ static bool is_whitespace(int ch) {
   return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
 }
 
+/* EOF handling for peek-char: EOF-ERROR-P is args[2], EOF-VALUE args[3]. */
+static emacs_value peek_eof(emacs_env *env, cl_stream_t *s, ptrdiff_t nargs,
+                            emacs_value *args) {
+  if (nargs >= 3 && !env->is_not_nil(env, args[2]))
+    return (nargs >= 4) ? args[3] : syms.v_nil;
+  signal_end_of_file(env, s);
+  return syms.v_nil;
+}
+
 emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                        void *data) {
   (void)data;
-  /* (cl-peek-char &optional peek-type stream eof-error-p eof-value) */
+  /* (cl-peek-char &optional peek-type stream eof-error-p eof-value recursive-p) */
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs,
                                           (nargs >= 1) ? 1 : 0,
                                           syms.var_sin);
   check_open(env, s, "cl-peek-char");
 
   /*
-   * peek-type nil  → peek at next char without consuming
+   * peek-type nil  → peek at the next char without consuming it
    * peek-type t    → skip whitespace, then peek
-   * peek-type char → skip until that char seen, then peek at next
+   * peek-type char → skip chars that are not char, then peek the matching
+   *                  char (it is left in the stream), per CLHS
    */
   emacs_value peek_type = (nargs >= 1) ? args[0] : syms.v_nil;
   bool skip_ws = env->eq(env, peek_type, syms.v_t);
@@ -181,19 +202,17 @@ emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   for (;;) {
-    if (!stream_listen(s)) return syms.v_nil;
-
     unsigned char ch;
     ptrdiff_t r = stream_read(s, &ch, 1);
-    if (r <= 0) return syms.v_nil;
+    if (r <= 0) return peek_eof(env, s, nargs, args);
 
     if (skip_ws && is_whitespace((int)ch))
       continue;             /* discard whitespace */
 
-    if (skip_to_char && (int)ch == target)
-      continue;             /* discard matching char */
+    if (skip_to_char && (int)ch != target)
+      continue;             /* skip chars before the matching one */
 
-    /* found the char to peek — push it back and return */
+    /* the char to peek at is left in the stream */
     stream_unread(s, ch);
     return eint(env, ch);
   }
@@ -263,8 +282,12 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       end = eint_extract(env, args[i + 1]);
   }
 
-  if (start < 0) start = 0;
-  if ((is_vec || is_str) && end > len) end = len;
+  /* CL: start and end must be valid bounding indices. */
+  if (start < 0 || end < 0 || end < start ||
+      ((is_vec || is_str) && (start > len || end > len))) {
+    signal_error(env, "cl-read-sequence: invalid bounding index");
+    return syms.v_nil;
+  }
   ptrdiff_t count = end - start;
   if (count <= 0) return eint(env, start);
 
@@ -405,16 +428,7 @@ emacs_value Fread_chunk(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   return efuncall_cached(env, syms.fn_cons, 2, pair_args);
 }
 
-/* ── cl-read-preserving-whitespace ────────────────────────────────────
-   Like cl-read but preserves trailing whitespace.
-   Our cl-read already preserves whitespace (pushes back unconsumed bytes),
-   so this is effectively an alias. */
-
-emacs_value Fread_preserving_whitespace(emacs_env *env, ptrdiff_t nargs,
-                                         emacs_value *args, void *data) {
-  extern emacs_value Fread(emacs_env *, ptrdiff_t, emacs_value *, void *);
-  return Fread(env, nargs, args, data);
-}
+/* cl-read-preserving-whitespace lives in lispio.c alongside cl-read. */
 
 /* ── cl-read-delimited-list ───────────────────────────────────────────
    (cl-read-delimited-list char &optional stream recursive-p)
@@ -466,18 +480,20 @@ emacs_value Fread_delimited_list(emacs_env *env, ptrdiff_t nargs,
   if (!sb) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
 
   emacs_value lst = syms.v_nil;
-  bool had_data = false;
 
   for (;;) {
-    if (!stream_listen(s)) break;
     unsigned char ch;
     ptrdiff_t r = stream_read(s, &ch, 1);
-    if (r <= 0) break;
+    if (r <= 0) {
+      /* CL: it is an error to reach end-of-file during the operation */
+      strbuf_free(sb);
+      signal_end_of_file(env, s);
+      return syms.v_nil;
+    }
 
     if ((int)ch == delim)
       break;  /* delimiter consumed per CL spec */
 
-    had_data = true;
     /* skip whitespace between forms */
     if (sb->len == 0 && (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'))
       continue;
@@ -497,12 +513,6 @@ emacs_value Fread_delimited_list(emacs_env *env, ptrdiff_t nargs,
   }
 
   strbuf_free(sb);
-
-  if (!had_data && env->is_not_nil(env, lst)) {
-    /* nothing parsed but delimiter found at start — return nil */
-    return syms.v_nil;
-  }
-
   return efuncall(env, "reverse", 1, &lst);
 }
 

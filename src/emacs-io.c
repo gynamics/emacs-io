@@ -211,15 +211,18 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "EOF-ERROR-P and EOF-VALUE are accepted for compatibility.\n"
         "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE)", NULL);
 
-  defun(env, "cl-peek-char", Fpeek_char, 0, 4,
+  defun(env, "cl-peek-char", Fpeek_char, 0, 5,
         "Return the next character from STREAM without removing it.\n"
         "\n"
         "PEEK-TYPE controls which character is returned:\n"
         "  nil  — return the next character (the default)\n"
         "  t    — skip whitespace, then return the next character\n"
-        "  char — skip characters equal to char, then return the next\n"
+        "  char — skip characters until CHAR is found, then return it\n"
+        "         (CHAR is left in the stream), as in CLHS\n"
         "STREAM defaults to `*standard-input*'.\n"
-        "\n(fn &optional PEEK-TYPE STREAM EOF-ERROR-P EOF-VALUE)", NULL);
+        "RECURSIVE-P is accepted for compatibility and currently ignored.\n"
+        "\n(fn &optional PEEK-TYPE STREAM EOF-ERROR-P EOF-VALUE RECURSIVE-P)",
+        NULL);
 
   defun(env, "cl-unread-char", Funread_char, 1, 2,
         "Return CHARACTER to STREAM so it will be read again.\n"
@@ -358,7 +361,7 @@ int emacs_module_init(struct emacs_runtime *runtime) {
         "Keyword arguments:\n"
         "  :DIRECTION   — :INPUT (default), :OUTPUT, :IO, or :PROBE\n"
         "  :ELEMENT-TYPE — character or (unsigned-byte 8)\n"
-        "  :IF-EXISTS   — :ERROR, :SUPERSEDE, :APPEND, :OVERWRITE, NIL\n"
+        "  :IF-EXISTS   — :ERROR (default), :SUPERSEDE, :APPEND, :OVERWRITE, NIL\n"
         "  :IF-DOES-NOT-EXIST — :ERROR, :CREATE, or NIL\n"
         "  :EXTERNAL-FORMAT — accepted for compatibility, currently ignored\n"
         "PROBE returns a closed stream if the file exists, NIL otherwise.\n"
@@ -610,14 +613,15 @@ int emacs_module_init(struct emacs_runtime *runtime) {
   defun(env, "cl-write", Fwrite, 1, 15,
         "Write OBJECT to STREAM.\n"
         "\n"
-        "Accepts standard CL print-control keyword arguments that bind\n"
-        "the corresponding Emacs print-* variables during output:\n"
-        "  :ESCAPE → print-escape\n"
+        "Accepts standard CL print-control keyword arguments.  Most bind\n"
+        "the corresponding Emacs print-* variable during output:\n"
         "  :RADIX → print-radix    :BASE → print-base\n"
         "  :CIRCLE → print-circle  :PRETTY → print-pretty\n"
         "  :LEVEL → print-level    :LENGTH → print-length\n"
         "  :CASE → print-case      :GENSYM → print-gensym\n"
-        "  :ARRAY → print-array    :READABLY → print-readably\n"
+        "  :ARRAY → print-array\n"
+        ":ESCAPE is emulated: nil prints without escaping (princ-style).\n"
+        ":READABLY is accepted for compatibility and ignored.\n"
         "\n(fn OBJECT &key STREAM ESCAPE RADIX BASE CIRCLE PRETTY LEVEL LENGTH CASE GENSYM ARRAY READABLY RIGHT-MARGIN MISER-WIDTH PPRINT-DISPATCH LINES)", NULL);
 
   defun(env, "cl-prin1", Fprin1, 1, 2,

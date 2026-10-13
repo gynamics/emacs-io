@@ -237,10 +237,12 @@ static ptrdiff_t sos_write_string(emacs_env *env, cl_stream_t *s, emacs_value st
 
   /* if tail block has room, write directly into it */
   if (sos_tail_fits(so, n)) {
+    char *dest = so->tail->data + so->tail->len;
     ptrdiff_t copied = slen;
-    if (!env->copy_string_contents(env, str, so->tail->data + so->tail->len, &copied)) return -1;
+    if (!env->copy_string_contents(env, str, dest, &copied)) return -1;
     so->tail->len += n;
     so->total_len += n;
+    stream_update_column(s, (const unsigned char *)dest, (ptrdiff_t)n);
     return (ptrdiff_t)n;
   }
 
@@ -254,6 +256,7 @@ static ptrdiff_t sos_write_string(emacs_env *env, cl_stream_t *s, emacs_value st
     return -1;
   }
   sos_link(so, bk, n);
+  stream_update_column(s, (const unsigned char *)bk->data, (ptrdiff_t)n);
 
   return (ptrdiff_t)n;
 }
@@ -391,5 +394,10 @@ emacs_value Fget_output_stream_string(emacs_env *env, ptrdiff_t nargs,
     signal_error(env, "Not a string output stream");
     return syms.v_nil;
   }
-  return str_output_to_string(env, s);
+  /* CL: the accumulated characters are cleared by this operation. */
+  pthread_mutex_lock(&s->mutex);
+  emacs_value result = str_output_to_string(env, s);
+  if (s->ops && s->ops->clear_output) s->ops->clear_output(s);
+  pthread_mutex_unlock(&s->mutex);
+  return result;
 }

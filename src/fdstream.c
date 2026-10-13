@@ -94,6 +94,7 @@ cl_stream_t *stream_create_fd(int fd, bool owns_fd, unsigned flags) {
 void stream_free(cl_stream_t *s) {
   if (!s) return;
 
+  stream_registry_remove(s);
   pthread_mutex_destroy(&s->mutex);
 
   if (s->ops && s->ops->destroy)
@@ -274,6 +275,7 @@ static void fds_destroy(cl_stream_t *s) {
   if (fi) {
     free(fi->rbuf);
     free(fi->wbuf);
+    free(fi->path);
     free(fi);
   }
 }
