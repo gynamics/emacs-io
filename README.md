@@ -23,7 +23,7 @@ ring buffers, zero copy within string streams, and no hook machinery.
 ```bash
 make                  # → emacs-io.so
 make verify           # confirm module loads in Emacs
-make test             # 128 unit tests
+make test             # 223 tests: unit + Common Lisp conformance
 make bench            # 12 performance benchmarks
 ```
 
@@ -66,13 +66,13 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 
 | Function | Signature | Description |
 |---|---|---|
-| `cl-open` | `(cl-open filename &key direction if-exists element-type)` | Open a file, return a stream |
+| `cl-open` | `(cl-open filename &key direction if-exists element-type)` | Open a file, return a stream (`:if-exists` defaults to `:error`) |
 | `cl-close` | `(cl-close stream)` | Close the stream |
 | `cl-open-stream-p` | `(cl-open-stream-p object)` | Return t if object is an open stream |
 | `cl-input-stream-p` | `(cl-input-stream-p stream)` | Return t if stream supports input |
 | `cl-output-stream-p` | `(cl-output-stream-p stream)` | Return t if stream supports output |
 | `cl-stream-element-type` | `(cl-stream-element-type stream)` | Return the type of elements read/written |
-| `cl-file-position` | `(cl-file-position stream &optional position)` | Return or set the current position |
+| `cl-file-position` | `(cl-file-position stream &optional position)` | Return or set the current position (`:start`/`:end` accepted) |
 | `cl-ftruncate` | `(cl-ftruncate stream length)` | Truncate file stream to given length |
 | `cl-file-regular-p` | `(cl-file-regular-p stream)` | Return t if stream is a regular file |
 | `cl-file-tty-p` | `(cl-file-tty-p stream)` | Return t if stream is a terminal |
@@ -83,7 +83,7 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 |---|---|---|
 | `cl-make-string-input-stream` | `(cl-make-string-input-stream string &optional start end)` | Create an input stream from a string |
 | `cl-make-string-output-stream` | `(cl-make-string-output-stream &key element-type size)` | Create an output stream that accumulates in a string |
-| `cl-get-output-stream-string` | `(cl-get-output-stream-string stream)` | Return the accumulated output as a string |
+| `cl-get-output-stream-string` | `(cl-get-output-stream-string stream)` | Return the accumulated output as a string (clears the stream) |
 | `cl-make-buffer-input-stream` | `(cl-make-buffer-input-stream buffer &key start end)` | Create an input stream from a buffer's text |
 | `cl-make-buffer-output-stream` | `(cl-make-buffer-output-stream buffer)` | Create an output stream that inserts into a buffer |
 | `cl-make-buffer-io-stream` | `(cl-make-buffer-io-stream buffer &key start end)` | Bidirectional buffer stream (reads snapshot, writes to buffer) |
@@ -95,7 +95,7 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 | `cl-read-char` | `(cl-read-char &optional stream eof-error-p eof-value)` | Read and return one character |
 | `cl-read-line` | `(cl-read-line &optional stream eof-error-p eof-value)` | Read a line, returns `(line . missing-newline-p)` |
 | `cl-read-byte` | `(cl-read-byte stream &optional eof-error-p eof-value)` | Read and return one byte |
-| `cl-peek-char` | `(cl-peek-char &optional peek-type stream ...)` | Preview the next character without consuming it |
+| `cl-peek-char` | `(cl-peek-char &optional peek-type stream eof-error-p eof-value recursive-p)` | Peek next char (`t` skips whitespace; a char skips up to and leaves it) |
 | `cl-unread-char` | `(cl-unread-char character &optional stream)` | Push a character back onto the stream |
 | `cl-listen` | `(cl-listen &optional stream)` | Return t if a character is available to read |
 | `cl-write-char` | `(cl-write-char character &optional stream)` | Write a character to the stream |
@@ -129,12 +129,14 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 |---|---|---|
 | `cl-read` | `(cl-read &optional stream eof-error-p eof-value recursive-p)` | Read one Lisp object from the stream |
 | `cl-read-from-string` | `(cl-read-from-string string &optional eof-error-p eof-value &key start end)` | Read one Lisp object from a string |
-| `cl-write` | `(cl-write object &key stream ...)` | Write a Lisp object to the stream |
+| `cl-write` | `(cl-write object &key stream ...)` | Write an object (`:stream` defaults to `*standard-output*`; `:escape nil` prints princ-style) |
 | `cl-prin1` | `(cl-prin1 object &optional stream)` | Write an object in a form readable by `cl-read` |
 | `cl-princ` | `(cl-princ object &optional stream)` | Write an object in human-readable form |
 | `cl-print` | `(cl-print object &optional stream)` | Write a newline, then the object, then a space |
+| `cl-pprint` | `(cl-pprint object &optional stream)` | Pretty-print an object (returns nil) |
 | `cl-prin1-to-string` | `(cl-prin1-to-string object)` | Return a string of the object, readable by `cl-read` |
 | `cl-princ-to-string` | `(cl-princ-to-string object)` | Return a human-readable string of the object |
+| `cl-write-to-string` | `(cl-write-to-string object &key ...)` | Return the printed representation as a string |
 
 ## Practical uses
 
@@ -268,7 +270,7 @@ dispatch.
 
 ```
 src/stream.h     — cl_stream struct, vtable, impl structs, public API
-src/stream.c     — dispatch layer: lock, 256-slot pushback ring, call vtable
+src/stream.c     — dispatch layer: lock, 256-slot pushback ring, call vtable, live-stream registry
 src/fdstream.c   — POSIX fd I/O with 8 KB userspace ring buffers
 src/mmapstream.c — mmap-backed input for regular files (zero-copy reads)
 src/strstream.c  — string-input (cursor), string-output (block-chain)
@@ -279,7 +281,7 @@ src/fileio.c     — cl-open, cl-close, predicates, file-position, file-length, 
 src/lispio.c     — cl-read (→ read-from-string), cl-prin1/princ/print/pprint, cl-write
 src/stdstream.c  — standard stream variable init
 src/compstream.c — synonym, broadcast, concatenated, two-way, echo streams
-src/util.c/h     — emacs_env wrappers, defun, kw_eq, strbuf, error signaling, symbol cache
+src/util.c/h     — emacs_env wrappers, defun trampoline, kw_eq, strbuf, seq_classify, stream_or_error, symbol cache
 src/emacs-io.c   — emacs_module_init, 68 defun registrations
 src/emacs-io-macros.el — cl-with-open-file, cl-with-open-stream macros
 ```
@@ -295,11 +297,13 @@ zero-copy reads from mmap and string-input streams.
 
 - **Buffer output streams**: byte-level writes (write-char, write-byte) are buffered in a strbuf and flushed to the target buffer on close or on the next string-write.  No data is lost.
 
-- **Synonym streams**: resolve the target stream once at construction and cache it.  Re-resolution per I/O (per CL spec) is not supported due to `emacs_env` boundary limitations.
+- **Synonym streams**: re-resolve the symbol's value before each operation (CL-compatible), via the stream `resolve` hook, outside the stream mutex.
 
-- **ERT byte-compiler quirk** (Emacs 31.0.90): `cl-fresh-line` and `cl-prin1` trigger `(invalid-function #<user-ptr ...>)` when called with a stream argument inside an `ert-deftest` body.  The functions work correctly in normal evaluation.  Tests for these use `*-to-string` variants.
+- **End-of-file condition**: EOF signals `(signal 'end-of-file ...)` — use `(condition-case ... (end-of-file ...))` to handle, not generic `error`.  `cl-read-line` returns a dotted pair `(line . missing-newline-p)` (and `(eof-value . t)` on immediate EOF), since Elisp has no multiple values.
 
-- **End-of-file condition**: EOF signals `(signal 'end-of-file ...)` — use `(condition-case ... (end-of-file ...))` to handle, not generic `error`.
+- **Common Lisp conformance**: behaviour follows the ANSI spec; `make test` runs the unit tests plus `test/emacs-io-conformance-test.el`, which exercises the CL boundary cases (`cl-open` `:if-exists` defaults to `:error`; `cl-close` of a constructed stream leaves its constituents open; `cl-get-output-stream-string` clears; `cl-write-char` writes UTF-8; `cl-file-position` accepts `:start`/`:end`; and so on).
+
+- **ERT byte-compiler quirk** (Emacs 31.0.90): `cl-fresh-line` and `cl-prin1` misbehave when called — even indirectly — from inside an `ert-deftest` body.  The functions work correctly in normal code; the conformance tests probe them at load time, outside any test lambda.
 
 ## License
 
