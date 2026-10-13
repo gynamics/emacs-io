@@ -65,16 +65,9 @@ cl_stream_t *stream_create_string_input(const char *data, size_t len) {
   si->len = len;
   si->pos = 0;
 
-  cl_stream_t *s = calloc(1, sizeof(*s));
+  cl_stream_t *s = stream_alloc(&string_input_ops, si, CL_STREAM_FLAG_INPUT);
   if (!s) { free(si); return NULL; }
-
-  s->ops = &string_input_ops;
-  s->impl = si;
   s->kind = CL_STREAM_KIND_STRING_INPUT;
-  s->flags = CL_STREAM_FLAG_INPUT;
-  atomic_init(&s->open, true);
-  pthread_mutex_init(&s->mutex, NULL);
-
   return s;
 }
 
@@ -144,37 +137,64 @@ static ptrdiff_t sis_file_length(cl_stream_t *s) {
 
 /* ── string output: block-chain (no realloc copying) ────────────────────*/
 
+/* Release every block in the chain and reset the accumulator. */
+static void sos_free_blocks(str_output_impl_t *so) {
+  str_block_t *bk = so->head;
+  while (bk) {
+    str_block_t *next = bk->next;
+    free(bk);
+    bk = next;
+  }
+  so->head = NULL;
+  so->tail = NULL;
+  so->total_len = 0;
+}
+
+/* Append a block that has already been filled with LEN bytes. */
+static void sos_link(str_output_impl_t *so, str_block_t *bk, size_t len) {
+  bk->len = len;
+  if (!so->head) so->head = bk;
+  else so->tail->next = bk;
+  so->tail = bk;
+  so->total_len += len;
+}
+
+/* True if the tail block has room for N more bytes. */
+static bool sos_tail_fits(const str_output_impl_t *so, size_t n) {
+  return so->tail && so->tail->cap - so->tail->len >= n;
+}
+
+/* Allocate a block able to hold CAP bytes (flexible array member). */
+static str_block_t *str_block_alloc(size_t cap) {
+  str_block_t *bk = malloc(sizeof(*bk) + cap);
+  if (!bk) return NULL;
+  bk->next = NULL;
+  bk->len = 0;
+  bk->cap = cap;
+  return bk;
+}
+
 cl_stream_t *stream_create_string_output(size_t hint_size) {
   str_output_impl_t *so = calloc(1, sizeof(*so));
   if (!so) return NULL;
 
   /* pre-allocate a single block if caller knows the expected size */
   if (hint_size > 0) {
-    str_block_t *bk = malloc(sizeof(*bk) + hint_size + 1);  /* +1 for null */
+    str_block_t *bk = str_block_alloc(hint_size + 1);  /* +1 for null */
     if (bk) {
-      bk->next = NULL;
-      bk->len  = 0;
-      bk->cap  = hint_size;  /* user-visible capacity */
+      bk->cap = hint_size;  /* user-visible capacity, as before */
       so->head = bk;
       so->tail = bk;
     }
   }
 
-  cl_stream_t *s = calloc(1, sizeof(*s));
+  cl_stream_t *s = stream_alloc(&string_output_ops, so, CL_STREAM_FLAG_OUTPUT);
   if (!s) {
-    str_block_t *bk = so->head;
-    while (bk) { str_block_t *n = bk->next; free(bk); bk = n; }
+    sos_free_blocks(so);
     free(so);
     return NULL;
   }
-
-  s->ops = &string_output_ops;
-  s->impl = so;
   s->kind = CL_STREAM_KIND_STRING_OUTPUT;
-  s->flags = CL_STREAM_FLAG_OUTPUT;
-  atomic_init(&s->open, true);
-  pthread_mutex_init(&s->mutex, NULL);
-
   return s;
 }
 
@@ -184,7 +204,7 @@ static ptrdiff_t sos_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
   if (!so) return -1;
 
   /* If tail has room, write directly — zero old-data copying */
-  if (so->tail && so->tail->cap - so->tail->len >= (size_t)n) {
+  if (sos_tail_fits(so, (size_t)n)) {
     memcpy(so->tail->data + so->tail->len, buf, (size_t)n);
     so->tail->len += (size_t)n;
     so->total_len += (size_t)n;
@@ -196,17 +216,10 @@ static ptrdiff_t sos_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
   size_t new_cap = STR_BLOCK_DEFAULT_CAP;
   if ((size_t)n > new_cap) new_cap = (size_t)n;
 
-  str_block_t *bk = malloc(sizeof(*bk) + new_cap);
+  str_block_t *bk = str_block_alloc(new_cap);
   if (!bk) return -1;
-  bk->next = NULL;
-  bk->len = (size_t)n;
-  bk->cap = new_cap;
   memcpy(bk->data, buf, (size_t)n);
-
-  if (!so->head) so->head = bk;
-  else so->tail->next = bk;
-  so->tail = bk;
-  so->total_len += (size_t)n;
+  sos_link(so, bk, (size_t)n);
 
   return n;
 }
@@ -223,7 +236,7 @@ static ptrdiff_t sos_write_string(emacs_env *env, cl_stream_t *s, emacs_value st
   size_t n = (size_t)(slen - 1);
 
   /* if tail block has room, write directly into it */
-  if (so->tail && so->tail->cap - so->tail->len >= n) {
+  if (sos_tail_fits(so, n)) {
     ptrdiff_t copied = slen;
     if (!env->copy_string_contents(env, str, so->tail->data + so->tail->len, &copied)) return -1;
     so->tail->len += n;
@@ -232,49 +245,28 @@ static ptrdiff_t sos_write_string(emacs_env *env, cl_stream_t *s, emacs_value st
   }
 
   /* allocate new block */
-  str_block_t *bk = malloc(sizeof(*bk) + n + 1);
+  str_block_t *bk = str_block_alloc(n + 1);
   if (!bk) return -1;
-  bk->next = NULL;
-  bk->len = n;
-  bk->cap = n;
 
   ptrdiff_t copied = slen;
   if (!env->copy_string_contents(env, str, bk->data, &copied)) {
     free(bk);
     return -1;
   }
-
-  if (!so->head) so->head = bk;
-  else so->tail->next = bk;
-  so->tail = bk;
-  so->total_len += n;
+  sos_link(so, bk, n);
 
   return (ptrdiff_t)n;
 }
 
 static void sos_clear_output(cl_stream_t *s) {
   str_output_impl_t *so = (str_output_impl_t *)s->impl;
-  if (!so) return;
-  str_block_t *bk = so->head;
-  while (bk) {
-    str_block_t *next = bk->next;
-    free(bk);
-    bk = next;
-  }
-  so->head = NULL;
-  so->tail = NULL;
-  so->total_len = 0;
+  if (so) sos_free_blocks(so);
 }
 
 static void sos_destroy(cl_stream_t *s) {
   str_output_impl_t *so = (str_output_impl_t *)s->impl;
   if (!so) return;
-  str_block_t *bk = so->head;
-  while (bk) {
-    str_block_t *next = bk->next;
-    free(bk);
-    bk = next;
-  }
+  sos_free_blocks(so);
   free(so);
 }
 
@@ -381,12 +373,8 @@ emacs_value Fmake_string_output(emacs_env *env, ptrdiff_t nargs,
       }
     }
   }
-  cl_stream_t *s = stream_create_string_output(hint);
-  if (!s) {
-    signal_error(env, "Cannot create string output stream");
-    return syms.v_nil;
-  }
-  return euser_ptr_stream_make(env, s);
+  return stream_or_error(env, stream_create_string_output(hint),
+                         "Cannot create string output stream");
 }
 
 /* ── cl-get-output-stream-string ──────────────────────────────────────── */

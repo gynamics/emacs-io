@@ -62,7 +62,7 @@ cl_stream_t *stream_create_fd(int fd, bool owns_fd, unsigned flags) {
     return NULL;
   }
 
-  cl_stream_t *s = calloc(1, sizeof(*s));
+  cl_stream_t *s = stream_alloc(&fd_stream_ops, fi, flags);
   if (!s) {
     free(fi->rbuf);
     free(fi->wbuf);
@@ -70,10 +70,7 @@ cl_stream_t *stream_create_fd(int fd, bool owns_fd, unsigned flags) {
     return NULL;
   }
 
-  s->ops = &fd_stream_ops;
-  s->impl = fi;
   s->kind = CL_STREAM_KIND_FD;
-  s->flags = flags;
 
   /* detect file type via standard Linux macros */
   {
@@ -83,9 +80,6 @@ cl_stream_t *stream_create_fd(int fd, bool owns_fd, unsigned flags) {
     if (isatty(fd))
       s->flags |= CL_STREAM_FLAG_INTERACTIVE;
   }
-
-  atomic_init(&s->open, true);
-  pthread_mutex_init(&s->mutex, NULL);
 
   /* apply non-blocking mode to fd */
   if (flags & CL_STREAM_FLAG_NONBLOCK) {

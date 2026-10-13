@@ -15,6 +15,17 @@ void check_open(emacs_env *env, cl_stream_t *s, const char *op) {
   }
 }
 
+/* Resolve the end-of-file behaviour for the readers whose signature is
+   (fn &optional STREAM EOF-ERROR-P EOF-VALUE): when EOF-ERROR-P is nil,
+   return EOF-VALUE (or nil); otherwise signal `end-of-file'. */
+static emacs_value read_eof(emacs_env *env, cl_stream_t *s, ptrdiff_t nargs,
+                            emacs_value *args) {
+  if (nargs >= 2 && !env->is_not_nil(env, args[1]))
+    return (nargs >= 3) ? args[2] : syms.v_nil;
+  signal_end_of_file(env, s);
+  return syms.v_nil;
+}
+
 /* ── cl-read-char ─────────────────────────────────────────────────────── */
 
 emacs_value Fread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
@@ -26,12 +37,7 @@ emacs_value Fread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   unsigned char ch;
   ptrdiff_t r = stream_read(s, &ch, 1);
-  if (r <= 0) {
-    if (nargs >= 2 && !env->is_not_nil(env, args[1])) /* eof-error-p nil */
-      return (nargs >= 3) ? args[2] : syms.v_nil;
-    signal_end_of_file(env, s);
-    return syms.v_nil;
-  }
+  if (r <= 0) return read_eof(env, s, nargs, args);
   return eint(env, ch);
 }
 
@@ -90,10 +96,7 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   if (sb->len == 0 && !saw_newline) {
     strbuf_free(sb);
-    if (nargs >= 2 && !env->is_not_nil(env, args[1]))
-      return (nargs >= 3) ? args[2] : syms.v_nil;
-    signal_end_of_file(env, s);
-    return syms.v_nil;
+    return read_eof(env, s, nargs, args);
   }
 
   emacs_value line = strbuf_to_estring(env, sb);
@@ -116,12 +119,7 @@ emacs_value Fread_byte(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   unsigned char b;
   ptrdiff_t r = stream_read(s, &b, 1);
-  if (r <= 0) {
-    if (nargs >= 2 && !env->is_not_nil(env, args[1]))
-      return (nargs >= 3) ? args[2] : syms.v_nil;
-    signal_end_of_file(env, s);
-    return syms.v_nil;
-  }
+  if (r <= 0) return read_eof(env, s, nargs, args);
   return eint(env, b);
 }
 
@@ -245,21 +243,15 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   if (!s || !stream_is_open(s))
     signal_error(env, "Stream is closed");
 
-  bool is_vec = env->eq(env, env->type_of(env, seq), eintern(env, "vector"));
-  bool is_str = !is_vec && env->eq(env, env->type_of(env, seq), syms.v_string);
-  bool is_list = !is_vec && !is_str &&
-                 env->eq(env, env->type_of(env, seq), eintern(env, "cons"));
-  if (!is_vec && !is_list && !is_str) {
+  ptrdiff_t len;
+  cl_seq_kind_t kind = seq_classify(env, seq, &len);
+  if (kind == CL_SEQ_INVALID) {
     signal_error(env, "cl-read-sequence: SEQUENCE must be a vector, list, or string");
     return syms.v_nil;
   }
+  bool is_vec = kind == CL_SEQ_VECTOR;
+  bool is_str = kind == CL_SEQ_STRING;
 
-  ptrdiff_t len = is_vec ? env->vec_size(env, seq)
-               : is_str ? 0 : 1 << 30;
-  if (is_str) {
-    env->copy_string_contents(env, seq, NULL, &len);
-    len--;  /* exclude null */
-  }
   ptrdiff_t start = 0;
   ptrdiff_t end = len;
 
@@ -343,8 +335,7 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   if (stream_direct(s, &daddr, &dlen)) {
     size_t to_read = (size_t)want < dlen ? (size_t)want : dlen;
     if (to_read == 0) {
-      if (nargs >= 4 && !env->is_not_nil(env, args[2]))
-        return (nargs >= 4) ? args[3] : syms.v_nil;
+      if (nargs >= 4 && !env->is_not_nil(env, args[2])) return args[3];
       signal_end_of_file(env, s);
       return syms.v_nil;
     }
@@ -361,8 +352,7 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   ptrdiff_t r = stream_read(s, buf, want);
   if (r <= 0) {
     free(buf);
-    if (nargs >= 4 && !env->is_not_nil(env, args[2]))
-      return (nargs >= 4) ? args[3] : syms.v_nil;
+    if (nargs >= 4 && !env->is_not_nil(env, args[2])) return args[3];
     signal_end_of_file(env, s);
     return syms.v_nil;
   }
@@ -430,6 +420,35 @@ emacs_value Fread_preserving_whitespace(emacs_env *env, ptrdiff_t nargs,
    (cl-read-delimited-list char &optional stream recursive-p)
    Read objects from STREAM until CHAR is seen, return them as a list. */
 
+/* Try to parse one complete form from the front of SB.  On success stores
+   the value in *val and the number of consumed bytes in *pos and returns
+   true.  Returns false (clearing any reader exit) when SB only holds an
+   incomplete form, so the caller should read more input. */
+static bool try_parse_prefix(emacs_env *env, strbuf_t *sb,
+                             emacs_value *val, ptrdiff_t *pos) {
+  emacs_value estr = env->make_string(env, sb->data, (ptrdiff_t)sb->len);
+  emacs_value raw = efuncall_cached(env, syms.fn_read_from_string, 1, &estr);
+  if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
+    env->non_local_exit_clear(env);
+    return false;
+  }
+  *val = efuncall_cached(env, syms.fn_car, 1, &raw);
+  *pos = eint_extract(env, efuncall_cached(env, syms.fn_cdr, 1, &raw));
+  return true;
+}
+
+/* Discard the first N bytes of SB. */
+static void strbuf_drop(strbuf_t *sb, ptrdiff_t n) {
+  if (n <= 0) return;
+  if ((size_t)n >= sb->len) {
+    sb->len = 0;
+  } else {
+    memmove(sb->data, sb->data + n, sb->len - (size_t)n);
+    sb->len -= (size_t)n;
+  }
+  sb->data[sb->len] = '\0';
+}
+
 emacs_value Fread_delimited_list(emacs_env *env, ptrdiff_t nargs,
                                   emacs_value *args, void *data) {
   (void)data;
@@ -465,31 +484,15 @@ emacs_value Fread_delimited_list(emacs_env *env, ptrdiff_t nargs,
 
     strbuf_append(sb, (const char *)&ch, 1);
 
-    /* try to parse what we have */
-    emacs_value estr = env->make_string(env, sb->data, (ptrdiff_t)sb->len);
-    emacs_value read_args[1] = { estr };
-    emacs_value raw = efuncall_cached(env, syms.fn_read_from_string, 1, read_args);
-
-    if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
-      /* incomplete form — need more data */
-      env->non_local_exit_clear(env);
-      continue;
-    }
-
-    /* got a complete form */
-    emacs_value val = efuncall_cached(env, syms.fn_car, 1, &raw);
-    ptrdiff_t pos = eint_extract(env, efuncall_cached(env, syms.fn_cdr, 1, &raw));
+    emacs_value val;
+    ptrdiff_t pos;
+    if (!try_parse_prefix(env, sb, &val, &pos))
+      continue;  /* incomplete form — need more data */
 
     if (pos > 0) {
-      /* form was read successfully */
       emacs_value pair[2] = { val, lst };
       lst = efuncall_cached(env, syms.fn_cons, 2, pair);
-
-      /* remove consumed chars from buffer */
-      if ((size_t)pos < sb->len)
-        memmove(sb->data, sb->data + pos, sb->len - (size_t)pos);
-      sb->len -= (size_t)pos;
-      sb->data[sb->len] = '\0';
+      strbuf_drop(sb, pos);
     }
   }
 
@@ -503,118 +506,86 @@ emacs_value Fread_delimited_list(emacs_env *env, ptrdiff_t nargs,
   return efuncall(env, "reverse", 1, &lst);
 }
 
+/* ── yes/no queries on *query-io* ────────────────────────────────────
+   Shared by cl-y-or-n-p and cl-yes-or-no-p, which differ only in the
+   prompt suffix and in how much of the answer must match. */
+
+/* Match a leading "y" (full == false) or "yes" (full == true). */
+static bool answer_is_yes(const char *s, ptrdiff_t len, bool full) {
+  if (len < 1 || (s[0] != 'y' && s[0] != 'Y')) return false;
+  if (!full) return true;
+  return len >= 3
+      && (s[1] == 'e' || s[1] == 'E')
+      && (s[2] == 's' || s[2] == 'S');
+}
+
+/* Write the formatted prompt (if any) followed by SUFFIX to S, read one
+   line from S, and return whether the answer matched.  Signals and
+   returns false if *query-io* is not an open stream. */
+static bool ask_query(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                      cl_stream_t *s, const char *suffix, bool full) {
+  if (nargs >= 1 && env->is_not_nil(env, args[0])) {
+    emacs_value fmt_args[16];
+    fmt_args[0] = args[0];
+    ptrdiff_t nfmt = nargs < 16 ? nargs : 16;
+    for (ptrdiff_t i = 1; i < nfmt; i++)
+      fmt_args[i] = args[i];
+
+    emacs_value prompt = env->funcall(env, eintern(env, "format"), nfmt, fmt_args);
+    stream_write_string(env, s, prompt);
+    stream_write_string(env, s, estring(env, suffix));
+  }
+
+  strbuf_t *sb = strbuf_create(128);
+  if (!sb) return false;
+  for (;;) {
+    unsigned char ch;
+    ptrdiff_t r = stream_read(s, &ch, 1);
+    if (r <= 0) break;
+    if (ch == '\n' || ch == '\r') break;
+    strbuf_append(sb, (const char *)&ch, 1);
+  }
+
+  emacs_value resp = strbuf_to_estring(env, sb);
+  strbuf_free(sb);
+
+  ptrdiff_t rlen = 0;
+  char *rstr = estring_alloc(env, resp, &rlen);
+  if (!rstr) return false;
+  bool result = answer_is_yes(rstr, rlen, full);
+  free(rstr);
+  return result;
+}
+
+/* Resolve *query-io*, then run ask_query against it. */
+static emacs_value query_io(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                            const char *fnname, const char *suffix, bool full) {
+  emacs_value qio = efuncall_cached(env, syms.fn_symbol_value, 1,
+                     (emacs_value[]){ eintern(env, "*query-io*") });
+  cl_stream_t *s = euser_ptr_stream_get(env, qio);
+  if (!s || !stream_is_open(s)) {
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%s: *query-io* is not an open stream", fnname);
+    signal_error(env, buf);
+    return syms.v_nil;
+  }
+  return ask_query(env, nargs, args, s, suffix, full) ? syms.v_t : syms.v_nil;
+}
+
 /* ── cl-y-or-n-p ─────────────────────────────────────────────────────
-   (cl-y-or-n-p &optional control &rest arguments)
-   Ask a yes/no question using *query-io*.  Returns t for yes, nil for no. */
+   (cl-y-or-n-p &optional control &rest arguments) */
 
 emacs_value Fy_or_n_p(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                        void *data) {
   (void)data;
-
-  /* get *query-io* stream directly (not from args) */
-  emacs_value qio = efuncall_cached(env, syms.fn_symbol_value, 1,
-                     (emacs_value[]){ eintern(env, "*query-io*") });
-  cl_stream_t *s = euser_ptr_stream_get(env, qio);
-  if (!s || !stream_is_open(s)) {
-    signal_error(env, "y-or-n-p: *query-io* is not an open stream");
-    return syms.v_nil;
-  }
-
-  /* format prompt if control string provided */
-  if (nargs >= 1 && env->is_not_nil(env, args[0])) {
-    emacs_value fmt_args[16];
-    fmt_args[0] = args[0];
-    for (ptrdiff_t i = 1; i < nargs && i < 16; i++)
-      fmt_args[i] = args[i];
-
-    emacs_value prompt = env->funcall(env, eintern(env, "format"),
-                                       (nargs < 16 ? nargs : 16), fmt_args);
-    stream_write_string(env, s, prompt);
-    stream_write_string(env, s, estring(env, " (y/n) "));
-  }
-
-  /* read response line */
-  strbuf_t *sb = strbuf_create(128);
-  if (!sb) return syms.v_nil;
-
-  for (;;) {
-    unsigned char ch;
-    ptrdiff_t r = stream_read(s, &ch, 1);
-    if (r <= 0) break;
-    if (ch == '\n' || ch == '\r') break;
-    strbuf_append(sb, (const char *)&ch, 1);
-  }
-
-  emacs_value resp = strbuf_to_estring(env, sb);
-  strbuf_free(sb);
-
-  /* check response */
-  ptrdiff_t rlen = 0;
-  char *rstr = estring_alloc(env, resp, &rlen);
-  if (!rstr) return syms.v_nil;
-
-  bool result = false;
-  if (rlen > 0 && (rstr[0] == 'y' || rstr[0] == 'Y'))
-    result = true;
-  free(rstr);
-
-  return result ? syms.v_t : syms.v_nil;
+  return query_io(env, nargs, args, "y-or-n-p", " (y/n) ", false);
 }
 
 /* ── cl-yes-or-no-p ──────────────────────────────────────────────────
-   (cl-yes-or-no-p &optional control &rest arguments)
-   Ask a yes/no question using *query-io*.  Requires full \"yes\"/\"no\". */
+   (cl-yes-or-no-p &optional control &rest arguments) */
 
 emacs_value Fyes_or_no_p(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                           void *data) {
   (void)data;
-
-  emacs_value qio = efuncall_cached(env, syms.fn_symbol_value, 1,
-                     (emacs_value[]){ eintern(env, "*query-io*") });
-  cl_stream_t *s = euser_ptr_stream_get(env, qio);
-  if (!s || !stream_is_open(s)) {
-    signal_error(env, "yes-or-no-p: *query-io* is not an open stream");
-    return syms.v_nil;
-  }
-
-  /* format prompt if control string provided */
-  if (nargs >= 1 && env->is_not_nil(env, args[0])) {
-    emacs_value fmt_args[16];
-    fmt_args[0] = args[0];
-    for (ptrdiff_t i = 1; i < nargs && i < 16; i++)
-      fmt_args[i] = args[i];
-
-    emacs_value prompt = env->funcall(env, eintern(env, "format"),
-                                       (nargs < 16 ? nargs : 16), fmt_args);
-    stream_write_string(env, s, prompt);
-    stream_write_string(env, s, estring(env, " (yes/no) "));
-  }
-
-  /* read response line */
-  strbuf_t *sb = strbuf_create(128);
-  if (!sb) return syms.v_nil;
-
-  for (;;) {
-    unsigned char ch;
-    ptrdiff_t r = stream_read(s, &ch, 1);
-    if (r <= 0) break;
-    if (ch == '\n' || ch == '\r') break;
-    strbuf_append(sb, (const char *)&ch, 1);
-  }
-
-  emacs_value resp = strbuf_to_estring(env, sb);
-  strbuf_free(sb);
-
-  ptrdiff_t rlen = 0;
-  char *rstr = estring_alloc(env, resp, &rlen);
-  if (!rstr) return syms.v_nil;
-
-  bool result = false;
-  if (rlen >= 3 && (rstr[0] == 'y' || rstr[0] == 'Y') &&
-      (rstr[1] == 'e' || rstr[1] == 'E') &&
-      (rstr[2] == 's' || rstr[2] == 'S'))
-    result = true;
-  free(rstr);
-
-  return result ? syms.v_t : syms.v_nil;
+  return query_io(env, nargs, args, "yes-or-no-p", " (yes/no) ", true);
 }

@@ -81,6 +81,9 @@ void provide(emacs_env *env, const char *feature);
 
 cl_stream_t *euser_ptr_stream_get(emacs_env *env, emacs_value val);
 emacs_value  euser_ptr_stream_make(emacs_env *env, cl_stream_t *s);
+/* Wrap S as a Lisp stream object.  If S is NULL, signal ERRMSG and
+   return nil.  Convenience for the "construct or fail" tails. */
+emacs_value  stream_or_error(emacs_env *env, cl_stream_t *s, const char *errmsg);
 cl_stream_t *get_stream_or_default(emacs_env *env, emacs_value *args,
                                     ptrdiff_t nargs, int argidx,
                                     const char *var);
@@ -94,6 +97,20 @@ void signal_end_of_file(emacs_env *env, cl_stream_t *s);
 /* ── keyword helpers ──────────────────────────────────────────────────── */
 
 bool kw_eq(emacs_env *env, emacs_value kw, const char *name);
+
+/* ── sequence classification ──────────────────────────────────────────── */
+
+typedef enum {
+  CL_SEQ_VECTOR,
+  CL_SEQ_STRING,
+  CL_SEQ_LIST,
+  CL_SEQ_INVALID
+} cl_seq_kind_t;
+
+/* Classify SEQ as a vector, string or list.  On success *len_out receives
+   its length (1<<30 for a list, which is treated as unbounded).  Returns
+   CL_SEQ_INVALID for anything else, with *len_out set to 0. */
+cl_seq_kind_t seq_classify(emacs_env *env, emacs_value seq, ptrdiff_t *len_out);
 
 /* ── string builder ───────────────────────────────────────────────────── */
 

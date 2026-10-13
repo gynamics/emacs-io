@@ -8,6 +8,20 @@
 #define UNLOCK(s) pthread_mutex_unlock(&(s)->mutex)
 #define RESOLVE(s) do { if ((s)->ops && (s)->ops->resolve) (s)->ops->resolve(s); } while (0)
 
+/* ── construction ────────────────────────────────────────────────────── */
+
+cl_stream_t *stream_alloc(const cl_stream_ops_t *ops, void *impl,
+                          unsigned flags) {
+  cl_stream_t *s = calloc(1, sizeof(*s));
+  if (!s) return NULL;
+  s->ops = ops;
+  s->impl = impl;
+  s->flags = flags;
+  atomic_init(&s->open, true);
+  pthread_mutex_init(&s->mutex, NULL);
+  return s;
+}
+
 ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
   if (!s || !buf || n <= 0 || !s->ops || !s->ops->read) return 0;
   if (!atomic_load(&s->open)) return 0;
@@ -31,25 +45,26 @@ ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
   return r;
 }
 
+/* Advance the output column/last-char bookkeeping by N written bytes,
+   restarting the column count after the last newline (for cl-fresh-line). */
+static void update_column(cl_stream_t *s, const unsigned char *p, ptrdiff_t n) {
+  ptrdiff_t after_nl = 0;
+  bool found_nl = false;
+  for (ptrdiff_t i = n - 1; i >= 0; i--) {
+    if (p[i] == '\n') { after_nl = n - 1 - i; found_nl = true; break; }
+  }
+  s->column = found_nl ? after_nl : s->column + n;
+  s->last_char = (int)p[n - 1];
+}
+
 ptrdiff_t stream_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
   if (!s || !buf || n <= 0 || !s->ops || !s->ops->write) return 0;
   if (!atomic_load(&s->open)) return 0;
   RESOLVE(s);
   LOCK(s);
   ptrdiff_t r = s->ops->write(s, buf, n);
-
-  /* column tracking for cl-fresh-line */
-  if (r > 0) {
-    const unsigned char *p = (const unsigned char *)buf;
-    ptrdiff_t after_nl = 0;
-    bool found_nl = false;
-    for (ptrdiff_t i = r - 1; i >= 0; i--) {
-      if (p[i] == '\n') { after_nl = r - 1 - i; found_nl = true; break; }
-    }
-    s->column = found_nl ? after_nl : s->column + r;
-    s->last_char = (int)p[r - 1];
-  }
-
+  if (r > 0)
+    update_column(s, (const unsigned char *)buf, r);
   UNLOCK(s);
   return r;
 }

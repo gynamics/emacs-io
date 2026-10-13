@@ -145,6 +145,13 @@ typedef struct {
 
 /* ── public stream API ───────────────────────────────────────────────── */
 
+/* Allocate a stream object wrapped around IMPL and initialise its
+   common fields (ops, flags, open flag, mutex).  KIND is left as-is.
+   Returns NULL on allocation failure; the caller still owns IMPL and
+   must free it in that case. */
+cl_stream_t *stream_alloc(const cl_stream_ops_t *ops, void *impl,
+                          unsigned flags);
+
 cl_stream_t *stream_create_fd(int fd, bool owns_fd, unsigned flags);
 cl_stream_t *stream_create_mmap(int fd, bool owns_fd);
 cl_stream_t *stream_create_string_input(const char *data, size_t len);

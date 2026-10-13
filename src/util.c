@@ -100,6 +100,14 @@ emacs_value euser_ptr_stream_make(emacs_env *env, cl_stream_t *s) {
   return env->make_user_ptr(env, stream_user_ptr_finalizer, s);
 }
 
+emacs_value stream_or_error(emacs_env *env, cl_stream_t *s, const char *errmsg) {
+  if (!s) {
+    signal_error(env, errmsg);
+    return syms.v_nil;
+  }
+  return euser_ptr_stream_make(env, s);
+}
+
 /* ── stream default resolution ──────────────────────────────────────── */
 
 cl_stream_t *get_stream_or_default(emacs_env *env, emacs_value *args,
@@ -225,6 +233,30 @@ cl_stream_t *get_stream_or_default_cached(emacs_env *env, emacs_value *args,
 
 bool kw_eq(emacs_env *env, emacs_value kw, const char *name) {
   return env->eq(env, kw, eintern(env, name));
+}
+
+/* ── sequence classification ──────────────────────────────────────────── */
+
+cl_seq_kind_t seq_classify(emacs_env *env, emacs_value seq, ptrdiff_t *len_out) {
+  emacs_value type = env->type_of(env, seq);
+
+  if (env->eq(env, type, eintern(env, "vector"))) {
+    *len_out = env->vec_size(env, seq);
+    return CL_SEQ_VECTOR;
+  }
+  if (env->eq(env, type, syms.v_string)) {
+    ptrdiff_t n = 0;
+    env->copy_string_contents(env, seq, NULL, &n);
+    *len_out = n - 1;  /* exclude the trailing NUL */
+    return CL_SEQ_STRING;
+  }
+  if (env->eq(env, type, eintern(env, "cons"))) {
+    *len_out = 1 << 30;  /* a list has no cheap length: treat as unbounded */
+    return CL_SEQ_LIST;
+  }
+
+  *len_out = 0;
+  return CL_SEQ_INVALID;
 }
 
 /* ── string builder ───────────────────────────────────────────────────── */

@@ -10,7 +10,155 @@
 
 /* ── cl-open ─────────────────────────────────────────────────────────────
    (cl-open filename &key DIRECTION ELEMENT-TYPE
-            IF-EXISTS IF-DOES-NOT-EXIST EXTERNAL-FORMAT) */
+             IF-EXISTS IF-DOES-NOT-EXIST EXTERNAL-FORMAT) */
+
+/* Direction codes stored in open_options_t.dir */
+enum { OPEN_INPUT = 0, OPEN_OUTPUT = 1, OPEN_IO = 2, OPEN_PROBE = 3 };
+
+/* Values for the if-exists / if-does-not-exist actions.  ACTION_DEFAULT
+   means "unspecified", which falls back to the CL defaults. */
+enum { ACTION_DEFAULT = -1, ACTION_NIL = 0, ACTION_SUPERSEDE = 1,
+       ACTION_APPEND = 2, ACTION_ERROR = 3, ACTION_OVERWRITE = 4 };
+
+typedef struct {
+  int         dir;                   /* OPEN_* */
+  unsigned    flags;                 /* CL_STREAM_FLAG_* */
+  int         oflags;                /* base open(2) flags for the direction */
+  int         if_exists;             /* ACTION_* */
+  int         if_does_not_exist;     /* ACTION_* */
+  emacs_value external_format;
+  bool        have_external_format;
+} open_options_t;
+
+static int if_exists_action(emacs_env *env, emacs_value v) {
+  if (kw_eq_cached(env, v, syms.k_supersede)) return ACTION_SUPERSEDE;
+  if (kw_eq_cached(env, v, syms.k_append))    return ACTION_APPEND;
+  if (kw_eq_cached(env, v, syms.k_error))     return ACTION_ERROR;
+  if (kw_eq_cached(env, v, syms.k_overwrite)) return ACTION_OVERWRITE;
+  if (env->eq(env, v, syms.v_nil))            return ACTION_NIL;
+  return ACTION_DEFAULT;
+}
+
+static int if_does_not_exist_action(emacs_env *env, emacs_value v) {
+  if (kw_eq_cached(env, v, syms.k_error)) return ACTION_ERROR;
+  if (env->eq(env, v, syms.v_nil))        return ACTION_NIL;
+  return ACTION_DEFAULT;
+}
+
+static void apply_direction(emacs_env *env, emacs_value d, open_options_t *o) {
+  if (kw_eq_cached(env, d, syms.d_input)) {
+    o->dir = OPEN_INPUT;
+    o->flags = (o->flags & ~CL_STREAM_FLAG_OUTPUT) | CL_STREAM_FLAG_INPUT;
+    o->oflags = O_RDONLY;
+  } else if (kw_eq_cached(env, d, syms.d_output)) {
+    o->dir = OPEN_OUTPUT;
+    o->flags = CL_STREAM_FLAG_OUTPUT;
+    o->oflags = O_WRONLY;
+  } else if (kw_eq_cached(env, d, syms.d_io)) {
+    o->dir = OPEN_IO;
+    o->flags = CL_STREAM_FLAG_INPUT | CL_STREAM_FLAG_OUTPUT;
+    o->oflags = O_RDWR;
+  } else if (kw_eq_cached(env, d, syms.d_probe)) {
+    o->dir = OPEN_PROBE;
+    o->flags = CL_STREAM_FLAG_INPUT;
+    o->oflags = O_RDONLY;
+  }
+}
+
+static void parse_open_options(emacs_env *env, ptrdiff_t nargs,
+                               emacs_value *args, open_options_t *o) {
+  o->dir = OPEN_INPUT;
+  o->flags = CL_STREAM_FLAG_INPUT;
+  o->oflags = O_RDONLY;
+  o->if_exists = ACTION_DEFAULT;
+  o->if_does_not_exist = ACTION_DEFAULT;
+  o->external_format = syms.v_nil;
+  o->have_external_format = false;
+
+  for (ptrdiff_t i = 1; i < nargs - 1; i += 2) {
+    emacs_value key = args[i], val = args[i + 1];
+    if (kw_eq_cached(env, key, syms.k_direction)) {
+      apply_direction(env, val, o);
+    } else if (kw_eq_cached(env, key, syms.k_element_type)) {
+      if (env->is_not_nil(env, val) && !env->eq(env, val, syms.v_character))
+        o->flags |= CL_STREAM_FLAG_BINARY;
+    } else if (kw_eq_cached(env, key, syms.k_if_exists)) {
+      o->if_exists = if_exists_action(env, val);
+    } else if (kw_eq_cached(env, key, syms.k_if_does_not_exist)) {
+      o->if_does_not_exist = if_does_not_exist_action(env, val);
+    } else if (kw_eq_cached(env, key, syms.k_external_format)) {
+      o->external_format = val;
+      o->have_external_format = true;
+    }
+  }
+}
+
+/* Fold :if-exists / :if-does-not-exist into the final open(2) flags.
+   Returns false when the file should not be opened (the NIL cases). */
+static bool resolve_open_flags(const open_options_t *o, const char *filename,
+                               int *oflags_out) {
+  int oflags = o->oflags;
+
+  switch (o->if_exists) {
+  case ACTION_NIL:
+    /* output/io: give up if the file already exists */
+    if (o->dir == OPEN_OUTPUT || o->dir == OPEN_IO) {
+      struct stat st;
+      if (stat(filename, &st) == 0) return false;
+    }
+    break;
+  case ACTION_SUPERSEDE: oflags |= O_CREAT | O_TRUNC; break;
+  case ACTION_APPEND:    oflags |= O_CREAT | O_APPEND; break;
+  case ACTION_ERROR:     oflags |= O_EXCL; break;
+  case ACTION_OVERWRITE: oflags |= O_CREAT; break;
+  default:
+    /* CL default: :output supersedes; :input/:io fall through to open(2) */
+    if (o->dir == OPEN_OUTPUT) oflags |= O_CREAT | O_TRUNC;
+    break;
+  }
+
+  switch (o->if_does_not_exist) {
+  case ACTION_NIL: {
+    /* give up if the file is missing */
+    struct stat st;
+    if (stat(filename, &st) < 0 && errno == ENOENT) return false;
+    break;
+  }
+  case ACTION_ERROR:
+    break;  /* leave it to open(2) to fail */
+  default:
+    /* CL default: :output/:io create the file */
+    if (o->dir == OPEN_OUTPUT || o->dir == OPEN_IO) oflags |= O_CREAT;
+    break;
+  }
+
+  *oflags_out = oflags;
+  return true;
+}
+
+/* :probe — stat only; return a closed stream, or nil if unreadable. */
+static emacs_value open_probe(emacs_env *env, const char *filename,
+                              const open_options_t *o) {
+  int fd = open(filename, O_RDONLY);
+  if (fd < 0) return syms.v_nil;
+  cl_stream_t *s = stream_create_fd(fd, true, CL_STREAM_FLAG_INPUT);
+  if (!s) { close(fd); return syms.v_nil; }
+  stream_close(s);
+  if (o->have_external_format)
+    s->external_format = env->make_global_ref(env, o->external_format);
+  return euser_ptr_stream_make(env, s);
+}
+
+/* Prefer a zero-copy mmap stream for plain readable regular files. */
+static cl_stream_t *make_file_stream(int fd, int oflags,
+                                     const open_options_t *o) {
+  if (oflags == O_RDONLY && !(o->flags & CL_STREAM_FLAG_BINARY)) {
+    struct stat st;
+    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode))
+      return stream_create_mmap(fd, true);
+  }
+  return stream_create_fd(fd, true, o->flags);
+}
 
 emacs_value Fopen(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                   void *data) {
@@ -26,127 +174,33 @@ emacs_value Fopen(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     return syms.v_nil;
   }
 
-  unsigned cl_flags = CL_STREAM_FLAG_INPUT;
-  int oflags = O_RDONLY;
-  int dir = 0;                   /* 0=input, 1=output, 2=io, 3=probe */
-  int if_exists_action = -1;    /* -1=default, 0=nil, 1=supersede,
-                                   2=append, 3=error, 4=overwrite */
-  int if_does_not_exist_action = -1; /* -1=default, 0=nil, 1=error */
-  emacs_value ext_fmt = syms.v_nil;
-  bool have_ext_fmt = false;
+  open_options_t o;
+  parse_open_options(env, nargs, args, &o);
 
-  for (ptrdiff_t i = 1; i < nargs - 1; i += 2) {
-    if (kw_eq_cached(env, args[i], syms.k_direction)) {
-      if (kw_eq_cached(env, args[i + 1], syms.d_input)) {
-        dir = 0;
-        cl_flags = (cl_flags & ~CL_STREAM_FLAG_OUTPUT) | CL_STREAM_FLAG_INPUT;
-        oflags = O_RDONLY;
-      } else if (kw_eq_cached(env, args[i + 1], syms.d_output)) {
-        dir = 1;
-        cl_flags = CL_STREAM_FLAG_OUTPUT;
-        oflags = O_WRONLY;
-      } else if (kw_eq_cached(env, args[i + 1], syms.d_io)) {
-        dir = 2;
-        cl_flags = CL_STREAM_FLAG_INPUT | CL_STREAM_FLAG_OUTPUT;
-        oflags = O_RDWR;
-      } else if (kw_eq_cached(env, args[i + 1], syms.d_probe)) {
-        dir = 3;
-        cl_flags = CL_STREAM_FLAG_INPUT;
-      }
-    } else if (kw_eq_cached(env, args[i], syms.k_element_type)) {
-      if (env->is_not_nil(env, args[i + 1]) &&
-          !env->eq(env, args[i + 1], syms.v_character))
-        cl_flags |= CL_STREAM_FLAG_BINARY;
-    } else if (kw_eq_cached(env, args[i], syms.k_if_exists)) {
-      if (kw_eq_cached(env, args[i + 1], syms.k_supersede))
-        if_exists_action = 1;
-      else if (kw_eq_cached(env, args[i + 1], syms.k_append))
-        if_exists_action = 2;
-      else if (kw_eq_cached(env, args[i + 1], syms.k_error))
-        if_exists_action = 3;
-      else if (kw_eq_cached(env, args[i + 1], syms.k_overwrite))
-        if_exists_action = 4;
-      else if (env->eq(env, args[i + 1], syms.v_nil))
-        if_exists_action = 0;
-    } else if (kw_eq_cached(env, args[i], syms.k_if_does_not_exist)) {
-      if (kw_eq_cached(env, args[i + 1], syms.k_error))
-        if_does_not_exist_action = 1;
-      else if (env->eq(env, args[i + 1], syms.v_nil))
-        if_does_not_exist_action = 0;
-    } else if (kw_eq_cached(env, args[i], syms.k_external_format)) {
-      ext_fmt = args[i + 1]; have_ext_fmt = true;
-    }
-  }
-
-  /* :probe — stat only, return closed stream or nil */
-  if (dir == 3) {
-    int fd = open(filename, O_RDONLY);
+  if (o.dir == OPEN_PROBE) {
+    emacs_value result = open_probe(env, filename, &o);
     free(filename);
-    if (fd < 0) return syms.v_nil;
-    cl_stream_t *s = stream_create_fd(fd, true, CL_STREAM_FLAG_INPUT);
-    if (!s) { close(fd); return syms.v_nil; }
-    stream_close(s);
-  if (have_ext_fmt)
-    s->external_format = env->make_global_ref(env, ext_fmt);
-
-  return euser_ptr_stream_make(env, s);
+    return result;
   }
 
-  /* apply :if-exists defaults and actions */
-  if (if_exists_action == 0) {
-    /* :if-exists nil — for output/io, return nil if file exists */
-    if (dir == 1 || dir == 2) {
-      struct stat st;
-      if (stat(filename, &st) == 0) { free(filename); return syms.v_nil; }
-    }
-  } else if (if_exists_action == 1) {
-    oflags |= O_CREAT | O_TRUNC;       /* :supersede */
-  } else if (if_exists_action == 2) {
-    oflags |= O_CREAT | O_APPEND;      /* :append */
-  } else if (if_exists_action == 3) {
-    oflags |= O_EXCL;                  /* :error (fail if file exists, no O_CREAT) */
-  } else if (if_exists_action == 4) {
-    oflags |= O_CREAT;                 /* :overwrite (no truncation) */
-  } else {
-    /* defaults per CL spec */
-    if (dir == 1) oflags |= O_CREAT | O_TRUNC;  /* :output → supersede */
-  }
-  /* :input / :io default is :error (no O_CREAT, OS will fail if missing) */
-
-  /* apply :if-does-not-exist */
-  if (if_does_not_exist_action == 0) {
-    /* :if-does-not-exist nil — return nil if file not present */
-    struct stat st;
-    if (stat(filename, &st) < 0 && errno == ENOENT) {
-      free(filename);
-      return syms.v_nil;
-    }
-  } else if (if_does_not_exist_action == 1) {
-    /* :error — don't add O_CREAT */
-  } else {
-    /* default: :output/:io create, :input auto-signals error through OS */
-    if (dir == 1 || dir == 2) oflags |= O_CREAT;
+  int oflags;
+  if (!resolve_open_flags(&o, filename, &oflags)) {
+    free(filename);
+    return syms.v_nil;
   }
 
   int fd = open(filename, oflags, 0644);
+  int saved_errno = errno;
   free(filename);
 
   if (fd < 0) {
     char buf[256];
-    snprintf(buf, sizeof(buf), "Cannot open file: %s", strerror(errno));
+    snprintf(buf, sizeof(buf), "Cannot open file: %s", strerror(saved_errno));
     signal_error(env, buf);
     return syms.v_nil;
   }
 
-  cl_stream_t *s = NULL;
-  if (oflags == O_RDONLY && !(cl_flags & CL_STREAM_FLAG_BINARY)) {
-    struct stat st;
-    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode))
-      s = stream_create_mmap(fd, true);
-  }
-  if (!s)
-    s = stream_create_fd(fd, true, cl_flags);
-
+  cl_stream_t *s = make_file_stream(fd, oflags, &o);
   if (!s) {
     close(fd);
     signal_error(env, "Cannot create stream");

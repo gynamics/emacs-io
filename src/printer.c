@@ -212,21 +212,15 @@ emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   cl_stream_t *s = euser_ptr_stream_get(env, args[1]);
   check_open(env, s, "cl-write-sequence");
 
-  bool is_vec = env->eq(env, env->type_of(env, seq), eintern(env, "vector"));
-  bool is_str = !is_vec && env->eq(env, env->type_of(env, seq), syms.v_string);
-  bool is_list = !is_vec && !is_str &&
-                 env->eq(env, env->type_of(env, seq), eintern(env, "cons"));
-  if (!is_vec && !is_list && !is_str) {
+  ptrdiff_t len;
+  cl_seq_kind_t kind = seq_classify(env, seq, &len);
+  if (kind == CL_SEQ_INVALID) {
     signal_error(env, "cl-write-sequence: SEQUENCE must be a vector, list, or string");
     return syms.v_nil;
   }
+  bool is_vec = kind == CL_SEQ_VECTOR;
+  bool is_str = kind == CL_SEQ_STRING;
 
-  ptrdiff_t len = is_vec ? env->vec_size(env, seq)
-               : is_str ? 0 : 1 << 30;
-  if (is_str) {
-    env->copy_string_contents(env, seq, NULL, &len);
-    len--;  /* exclude null */
-  }
   ptrdiff_t start = 0;
   ptrdiff_t end = len;
 
