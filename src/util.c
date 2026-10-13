@@ -133,19 +133,6 @@ emacs_value stream_or_error(emacs_env *env, cl_stream_t *s, const char *errmsg) 
   return euser_ptr_stream_make(env, s);
 }
 
-/* ── stream default resolution ──────────────────────────────────────── */
-
-cl_stream_t *get_stream_or_default(emacs_env *env, emacs_value *args,
-                                    ptrdiff_t nargs, int argidx,
-                                    const char *var) {
-  if (argidx < nargs && env->is_not_nil(env, args[argidx]))
-    return euser_ptr_stream_get(env, args[argidx]);
-
-  emacs_value sv = efuncall(env, "symbol-value", 1,
-                             (emacs_value[]){ eintern(env, var) });
-  return euser_ptr_stream_get(env, sv);
-}
-
 /* ── error signaling ──────────────────────────────────────────────────── */
 
 void signal_error(emacs_env *env, const char *msg) {
@@ -159,6 +146,14 @@ void signal_end_of_file(emacs_env *env, cl_stream_t *s) {
   emacs_value data = efuncall_cached(env, syms.fn_list, 1, &sv);
   emacs_value args[2] = { syms.v_end_of_file, data };
   efuncall_cached(env, syms.fn_signal, 2, args);
+}
+
+emacs_value eof_result(emacs_env *env, cl_stream_t *s, ptrdiff_t nargs,
+                       emacs_value *args, int err_idx, int val_idx) {
+  if (err_idx < nargs && !env->is_not_nil(env, args[err_idx]))
+    return (val_idx < nargs) ? args[val_idx] : syms.v_nil;
+  signal_end_of_file(env, s);
+  return syms.v_nil;
 }
 
 /* ── pre-interned symbol table ─────────────────────────────────────────── */
@@ -190,11 +185,6 @@ void syms_init(emacs_env *env) {
   syms.k_case         = G(eintern(env, ":case"));
   syms.k_gensym       = G(eintern(env, ":gensym"));
   syms.k_array        = G(eintern(env, ":array"));
-  syms.k_readably     = G(eintern(env, ":readably"));
-  syms.k_right_margin = G(eintern(env, ":right-margin"));
-  syms.k_miser_width  = G(eintern(env, ":miser-width"));
-  syms.k_pprint_dispatch = G(eintern(env, ":pprint-dispatch"));
-  syms.k_lines        = G(eintern(env, ":lines"));
   syms.k_preserve_whitespace = G(eintern(env, ":preserve-whitespace"));
   syms.k_abort        = G(eintern(env, ":abort"));
 
@@ -207,15 +197,12 @@ void syms_init(emacs_env *env) {
   syms.fn_cdr            = G(eintern(env, "cdr"));
   syms.fn_list           = G(eintern(env, "list"));
   syms.fn_cons           = G(eintern(env, "cons"));
-  syms.fn_concat         = G(eintern(env, "concat"));
   syms.fn_set            = G(eintern(env, "set"));
   syms.fn_symbol_value   = G(eintern(env, "symbol-value"));
   syms.fn_read_from_string = G(eintern(env, "read-from-string"));
   syms.fn_prin1_to_string = G(eintern(env, "prin1-to-string"));
   syms.fn_buffer_substring = G(eintern(env, "buffer-substring-no-properties"));
   syms.fn_buffer_size    = G(eintern(env, "buffer-size"));
-  syms.fn_defalias       = G(eintern(env, "defalias"));
-  syms.fn_provide        = G(eintern(env, "provide"));
   syms.fn_error          = G(eintern(env, "error"));
   syms.fn_signal         = G(eintern(env, "signal"));
 
@@ -252,12 +239,6 @@ cl_stream_t *get_stream_or_default_cached(emacs_env *env, emacs_value *args,
   emacs_value sv = efuncall_cached(env, syms.fn_symbol_value, 1,
                                    (emacs_value[]){ var_sym });
   return euser_ptr_stream_get(env, sv);
-}
-
-/* ── keyword helpers ──────────────────────────────────────────────────── */
-
-bool kw_eq(emacs_env *env, emacs_value kw, const char *name) {
-  return env->eq(env, kw, eintern(env, name));
 }
 
 /* ── sequence classification ──────────────────────────────────────────── */

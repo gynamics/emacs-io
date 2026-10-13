@@ -1,5 +1,6 @@
 #include "stream.h"
 #include "util.h"
+#include "subrs.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -65,9 +66,9 @@ cl_stream_t *stream_create_string_input(const char *data, size_t len) {
   si->len = len;
   si->pos = 0;
 
-  cl_stream_t *s = stream_alloc(&string_input_ops, si, CL_STREAM_FLAG_INPUT);
+  cl_stream_t *s = stream_alloc(&string_input_ops, si,
+                                CL_STREAM_KIND_STRING_INPUT, CL_STREAM_FLAG_INPUT);
   if (!s) { free(si); return NULL; }
-  s->kind = CL_STREAM_KIND_STRING_INPUT;
   return s;
 }
 
@@ -188,13 +189,13 @@ cl_stream_t *stream_create_string_output(size_t hint_size) {
     }
   }
 
-  cl_stream_t *s = stream_alloc(&string_output_ops, so, CL_STREAM_FLAG_OUTPUT);
+  cl_stream_t *s = stream_alloc(&string_output_ops, so,
+                                CL_STREAM_KIND_STRING_OUTPUT, CL_STREAM_FLAG_OUTPUT);
   if (!s) {
     sos_free_blocks(so);
     free(so);
     return NULL;
   }
-  s->kind = CL_STREAM_KIND_STRING_OUTPUT;
   return s;
 }
 

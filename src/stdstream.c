@@ -1,6 +1,7 @@
 #include "emacs-module.h"
 #include "stream.h"
 #include "util.h"
+#include "subrs.h"
 #include <unistd.h>
 
 /* Set the Lisp variable NAME to VALUE. */

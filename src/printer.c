@@ -1,6 +1,7 @@
 #include "emacs-module.h"
 #include "stream.h"
 #include "util.h"
+#include "subrs.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>

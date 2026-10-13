@@ -1,6 +1,7 @@
 #include "emacs-module.h"
 #include "stream.h"
 #include "util.h"
+#include "subrs.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -109,10 +110,7 @@ static emacs_value read_form(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       env->non_local_exit_check(env) != emacs_funcall_exit_return;
     strbuf_free(sb);
     if (reader_error) return syms.v_nil;   /* propagate the pending error */
-    if (nargs >= 2 && !env->is_not_nil(env, args[1]))
-      return (nargs >= 3) ? args[2] : syms.v_nil;
-    signal_end_of_file(env, s);
-    return syms.v_nil;
+    return eof_result(env, s, nargs, args, 1, 2);
   }
 
   /* Push back the unconsumed bytes; when not preserving whitespace, drop

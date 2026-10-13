@@ -1,5 +1,6 @@
 #include "stream.h"
 #include "util.h"
+#include "subrs.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -127,9 +128,9 @@ cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
   if (!bi) { free(data); return NULL; }
   bi->data = data; bi->len = slen; bi->pos = 0;
 
-  cl_stream_t *s = stream_alloc(&buffer_input_ops, bi, CL_STREAM_FLAG_INPUT);
+  cl_stream_t *s = stream_alloc(&buffer_input_ops, bi,
+                                CL_STREAM_KIND_BUFFER_INPUT, CL_STREAM_FLAG_INPUT);
   if (!s) { free(bi->data); free(bi); return NULL; }
-  s->kind = CL_STREAM_KIND_BUFFER_INPUT;
   return s;
 }
 
@@ -259,7 +260,8 @@ cl_stream_t *stream_create_buffer_output(emacs_env *env, emacs_value buffer) {
   bo->sb = strbuf_create(4096);
   if (!bo->sb) { env->free_global_ref(env, bo->buffer_ref); free(bo); return NULL; }
 
-  cl_stream_t *s = stream_alloc(&buffer_output_ops, bo, CL_STREAM_FLAG_OUTPUT);
+  cl_stream_t *s = stream_alloc(&buffer_output_ops, bo,
+                                CL_STREAM_KIND_BUFFER_OUTPUT, CL_STREAM_FLAG_OUTPUT);
   if (!s) {
     env->free_global_ref(env, bo->buffer_ref);
     strbuf_free(bo->sb); free(bo); return NULL;
@@ -384,7 +386,7 @@ cl_stream_t *stream_create_buffer_io(emacs_env *env, emacs_value buffer,
     free(bi->data); free(bi); return NULL;
   }
 
-  cl_stream_t *s = stream_alloc(&buffer_io_ops, bi,
+  cl_stream_t *s = stream_alloc(&buffer_io_ops, bi, CL_STREAM_KIND_BUFFER_IO,
                                 CL_STREAM_FLAG_INPUT | CL_STREAM_FLAG_OUTPUT);
   if (!s) {
     env->free_global_ref(env, bi->buffer_ref);

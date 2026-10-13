@@ -22,7 +22,7 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-$(SRC)/%.o: $(SRC)/%.c $(SRC)/stream.h $(SRC)/util.h Makefile
+$(SRC)/%.o: $(SRC)/%.c $(SRC)/stream.h $(SRC)/util.h $(SRC)/subrs.h Makefile
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:

@@ -68,6 +68,13 @@ typedef enum {
   CL_STREAM_KIND_STRING_INPUT,
   CL_STREAM_KIND_STRING_OUTPUT,
   CL_STREAM_KIND_BUFFER_INPUT,
+  CL_STREAM_KIND_BUFFER_OUTPUT,
+  CL_STREAM_KIND_BUFFER_IO,
+  CL_STREAM_KIND_SYNONYM,
+  CL_STREAM_KIND_BROADCAST,
+  CL_STREAM_KIND_CONCATENATED,
+  CL_STREAM_KIND_TWO_WAY,
+  CL_STREAM_KIND_ECHO,
 } cl_stream_kind_t;
 
 struct cl_stream {
@@ -148,11 +155,11 @@ typedef struct {
 /* ── public stream API ───────────────────────────────────────────────── */
 
 /* Allocate a stream object wrapped around IMPL and initialise its
-   common fields (ops, flags, open flag, mutex).  KIND is left as-is.
-   Returns NULL on allocation failure; the caller still owns IMPL and
-   must free it in that case. */
+   common fields (ops, kind, flags, open flag, mutex).  Returns NULL on
+   allocation failure; the caller still owns IMPL and must free it in
+   that case. */
 cl_stream_t *stream_alloc(const cl_stream_ops_t *ops, void *impl,
-                          unsigned flags);
+                          cl_stream_kind_t kind, unsigned flags);
 
 /* Registry of live streams, so predicates can recognise emacs-io streams
    (Emacs cannot otherwise tell one module's user-ptr from another's). */

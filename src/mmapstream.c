@@ -49,10 +49,10 @@ cl_stream_t *stream_create_mmap(int fd, bool owns_fd) {
   mi->fd   = fd;
   mi->owns_fd = owns_fd;
 
-  cl_stream_t *s = stream_alloc(&mmap_stream_ops, mi, CL_STREAM_FLAG_INPUT);
+  cl_stream_t *s = stream_alloc(&mmap_stream_ops, mi,
+                                CL_STREAM_KIND_MMAP, CL_STREAM_FLAG_INPUT);
   if (!s) { munmap(addr, (size_t)st.st_size); free(mi); return NULL; }
 
-  s->kind = CL_STREAM_KIND_MMAP;
   s->file_mode = st.st_mode;  /* already have from fstat above */
   return s;
 }

@@ -53,11 +53,12 @@ bool stream_registered(cl_stream_t *s) {
 /* ── construction ────────────────────────────────────────────────────── */
 
 cl_stream_t *stream_alloc(const cl_stream_ops_t *ops, void *impl,
-                          unsigned flags) {
+                          cl_stream_kind_t kind, unsigned flags) {
   cl_stream_t *s = calloc(1, sizeof(*s));
   if (!s) return NULL;
   s->ops = ops;
   s->impl = impl;
+  s->kind = kind;
   s->flags = flags;
   atomic_init(&s->open, true);
   pthread_mutex_init(&s->mutex, NULL);

@@ -1,6 +1,7 @@
 #include "emacs-module.h"
 #include "stream.h"
 #include "util.h"
+#include "subrs.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -15,17 +16,6 @@ void check_open(emacs_env *env, cl_stream_t *s, const char *op) {
   }
 }
 
-/* Resolve the end-of-file behaviour for the readers whose signature is
-   (fn &optional STREAM EOF-ERROR-P EOF-VALUE): when EOF-ERROR-P is nil,
-   return EOF-VALUE (or nil); otherwise signal `end-of-file'. */
-static emacs_value read_eof(emacs_env *env, cl_stream_t *s, ptrdiff_t nargs,
-                            emacs_value *args) {
-  if (nargs >= 2 && !env->is_not_nil(env, args[1]))
-    return (nargs >= 3) ? args[2] : syms.v_nil;
-  signal_end_of_file(env, s);
-  return syms.v_nil;
-}
-
 /* ── cl-read-char ─────────────────────────────────────────────────────── */
 
 emacs_value Fread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
@@ -37,7 +27,7 @@ emacs_value Fread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   unsigned char ch;
   ptrdiff_t r = stream_read(s, &ch, 1);
-  if (r <= 0) return read_eof(env, s, nargs, args);
+  if (r <= 0) return eof_result(env, s, nargs, args, 1, 2);
   return eint(env, ch);
 }
 
@@ -129,7 +119,7 @@ emacs_value Fread_byte(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   unsigned char b;
   ptrdiff_t r = stream_read(s, &b, 1);
-  if (r <= 0) return read_eof(env, s, nargs, args);
+  if (r <= 0) return eof_result(env, s, nargs, args, 1, 2);
   return eint(env, b);
 }
 
@@ -149,14 +139,14 @@ emacs_value Fread_char_no_hang(emacs_env *env, ptrdiff_t nargs,
 
   if (!stream_listen(s)) {
     if (interactive) return syms.v_nil;
-    return read_eof(env, s, nargs, args);
+    return eof_result(env, s, nargs, args, 1, 2);
   }
 
   unsigned char ch;
   ptrdiff_t r = stream_read(s, &ch, 1);
   if (r <= 0) {
     if (interactive) return syms.v_nil;
-    return read_eof(env, s, nargs, args);
+    return eof_result(env, s, nargs, args, 1, 2);
   }
   return eint(env, ch);
 }
@@ -165,15 +155,6 @@ emacs_value Fread_char_no_hang(emacs_env *env, ptrdiff_t nargs,
 
 static bool is_whitespace(int ch) {
   return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
-}
-
-/* EOF handling for peek-char: EOF-ERROR-P is args[2], EOF-VALUE args[3]. */
-static emacs_value peek_eof(emacs_env *env, cl_stream_t *s, ptrdiff_t nargs,
-                            emacs_value *args) {
-  if (nargs >= 3 && !env->is_not_nil(env, args[2]))
-    return (nargs >= 4) ? args[3] : syms.v_nil;
-  signal_end_of_file(env, s);
-  return syms.v_nil;
 }
 
 emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
@@ -204,7 +185,7 @@ emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   for (;;) {
     unsigned char ch;
     ptrdiff_t r = stream_read(s, &ch, 1);
-    if (r <= 0) return peek_eof(env, s, nargs, args);
+    if (r <= 0) return eof_result(env, s, nargs, args, 2, 3);
 
     if (skip_ws && is_whitespace((int)ch))
       continue;             /* discard whitespace */

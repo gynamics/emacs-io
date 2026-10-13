@@ -62,15 +62,13 @@ cl_stream_t *stream_create_fd(int fd, bool owns_fd, unsigned flags) {
     return NULL;
   }
 
-  cl_stream_t *s = stream_alloc(&fd_stream_ops, fi, flags);
+  cl_stream_t *s = stream_alloc(&fd_stream_ops, fi, CL_STREAM_KIND_FD, flags);
   if (!s) {
     free(fi->rbuf);
     free(fi->wbuf);
     free(fi);
     return NULL;
   }
-
-  s->kind = CL_STREAM_KIND_FD;
 
   /* detect file type via standard Linux macros */
   {

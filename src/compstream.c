@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "stream.h"
 #include "util.h"
+#include "subrs.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -149,7 +150,7 @@ cl_stream_t *stream_create_synonym(cl_stream_t *target, emacs_env *env,
   if (env && env->is_not_nil(env, symbol))
     si->symbol = env->make_global_ref(env, symbol);
 
-  cl_stream_t *s = stream_alloc(&synonym_stream_ops, si,
+  cl_stream_t *s = stream_alloc(&synonym_stream_ops, si, CL_STREAM_KIND_SYNONYM,
                                 CL_STREAM_FLAG_INPUT | CL_STREAM_FLAG_OUTPUT);
   if (!s) { free(si); return NULL; }
   return s;
@@ -302,7 +303,8 @@ cl_stream_t *stream_create_broadcast(cl_stream_t **streams, ptrdiff_t count) {
   if (!bc->streams) { free(bc); return NULL; }
   bc->count = count;
 
-  cl_stream_t *s = stream_alloc(&broadcast_stream_ops, bc, CL_STREAM_FLAG_OUTPUT);
+  cl_stream_t *s = stream_alloc(&broadcast_stream_ops, bc,
+                                CL_STREAM_KIND_BROADCAST, CL_STREAM_FLAG_OUTPUT);
   if (!s) { free(bc->streams); free(bc); return NULL; }
   return s;
 }
@@ -315,7 +317,8 @@ cl_stream_t *stream_create_concatenated(cl_stream_t **streams, ptrdiff_t count) 
   ci->count = count;
   ci->current = 0;
 
-  cl_stream_t *s = stream_alloc(&concat_stream_ops, ci, CL_STREAM_FLAG_INPUT);
+  cl_stream_t *s = stream_alloc(&concat_stream_ops, ci,
+                                CL_STREAM_KIND_CONCATENATED, CL_STREAM_FLAG_INPUT);
   if (!s) { free(ci->streams); free(ci); return NULL; }
   return s;
 }
@@ -412,8 +415,9 @@ static cl_stream_t *duplex_create(cl_stream_t *input, cl_stream_t *output,
   d->output = output;
   d->echo = echo;
 
-  cl_stream_t *s = stream_alloc(echo ? &echo_stream_ops : &twoway_stream_ops,
-                                d, CL_STREAM_FLAG_INPUT | CL_STREAM_FLAG_OUTPUT);
+  cl_stream_t *s = stream_alloc(echo ? &echo_stream_ops : &twoway_stream_ops, d,
+                                echo ? CL_STREAM_KIND_ECHO : CL_STREAM_KIND_TWO_WAY,
+                                CL_STREAM_FLAG_INPUT | CL_STREAM_FLAG_OUTPUT);
   if (!s) { free(d); return NULL; }
   return s;
 }

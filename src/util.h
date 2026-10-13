@@ -19,18 +19,17 @@ typedef struct {
   emacs_value k_supersede, k_append, k_overwrite, k_error;
   emacs_value k_start, k_end, k_size, k_stream;
   emacs_value k_escape, k_radix, k_base, k_circle, k_pretty, k_level, k_length;
-  emacs_value k_case, k_gensym, k_array, k_readably;
-  emacs_value k_right_margin, k_miser_width, k_pprint_dispatch, k_lines;
+  emacs_value k_case, k_gensym, k_array;
   emacs_value k_preserve_whitespace, k_abort;
 
   /* direction argument values (:input, :output, etc.) */
   emacs_value d_input, d_output, d_io, d_probe;
 
   /* Lisp function names */
-  emacs_value fn_car, fn_cdr, fn_list, fn_cons, fn_concat, fn_set;
+  emacs_value fn_car, fn_cdr, fn_list, fn_cons, fn_set;
   emacs_value fn_symbol_value, fn_read_from_string, fn_prin1_to_string;
   emacs_value fn_buffer_substring, fn_buffer_size;
-  emacs_value fn_defalias, fn_provide, fn_error, fn_signal;
+  emacs_value fn_error, fn_signal;
 
   /* common values */
   emacs_value v_nil, v_t, v_character, v_string;
@@ -77,16 +76,11 @@ void provide(emacs_env *env, const char *feature);
 
 /* ── stream <-> emacs_value helpers ────────────────────────────────────── */
 
-#define STREAM_USER_PTR_TAG "emacs-io-cl-stream"
-
 cl_stream_t *euser_ptr_stream_get(emacs_env *env, emacs_value val);
 emacs_value  euser_ptr_stream_make(emacs_env *env, cl_stream_t *s);
 /* Wrap S as a Lisp stream object.  If S is NULL, signal ERRMSG and
    return nil.  Convenience for the "construct or fail" tails. */
 emacs_value  stream_or_error(emacs_env *env, cl_stream_t *s, const char *errmsg);
-cl_stream_t *get_stream_or_default(emacs_env *env, emacs_value *args,
-                                    ptrdiff_t nargs, int argidx,
-                                    const char *var);
 void check_open(emacs_env *env, cl_stream_t *s, const char *op);
 
 /* ── error signaling ──────────────────────────────────────────────────── */
@@ -94,9 +88,11 @@ void check_open(emacs_env *env, cl_stream_t *s, const char *op);
 void signal_error(emacs_env *env, const char *msg);
 void signal_end_of_file(emacs_env *env, cl_stream_t *s);
 
-/* ── keyword helpers ──────────────────────────────────────────────────── */
-
-bool kw_eq(emacs_env *env, emacs_value kw, const char *name);
+/* Resolve end-of-file for a reader whose EOF-ERROR-P is ARGS[ERR_IDX] and
+   EOF-VALUE is ARGS[VAL_IDX]: return EOF-VALUE (or nil) when EOF-ERROR-P is
+   supplied and nil, otherwise signal `end-of-file'. */
+emacs_value eof_result(emacs_env *env, cl_stream_t *s, ptrdiff_t nargs,
+                       emacs_value *args, int err_idx, int val_idx);
 
 /* ── sequence classification ──────────────────────────────────────────── */
 
