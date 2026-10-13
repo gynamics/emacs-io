@@ -40,17 +40,6 @@ static ptrdiff_t buffer_write_string(emacs_env *env, emacs_value bufref,
   return slen;
 }
 
-/* Copy up to N bytes from a fixed snapshot starting at *POS, advancing it. */
-static ptrdiff_t snapshot_read(const char *data, size_t len, size_t *pos,
-                               void *buf, ptrdiff_t n) {
-  if (!data || *pos >= len) return 0;
-  size_t remaining = len - *pos;
-  size_t to_copy = (size_t)n < remaining ? (size_t)n : remaining;
-  memcpy(buf, data + *pos, to_copy);
-  *pos += to_copy;
-  return (ptrdiff_t)to_copy;
-}
-
 /* Resolve :START / :END keyword arguments for a buffer stream whose
    buffer object is args[0].  Defaults are 0 and the buffer size. */
 static void buffer_region(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
@@ -94,29 +83,18 @@ static char *buf_snapshot(emacs_env *env, emacs_value buffer,
 
 /* ── buffer input stream ─────────────────────────────────────────────── */
 
-static ptrdiff_t bis_read(cl_stream_t *s, void *buf, ptrdiff_t n);
-static int       bis_close(cl_stream_t *s);
-static bool      bis_listen(cl_stream_t *s);
-static void      bis_destroy(cl_stream_t *s);
-static ptrdiff_t bis_file_position(cl_stream_t *s);
-static bool      bis_set_file_position(cl_stream_t *s, ptrdiff_t pos);
-static ptrdiff_t bis_file_length(cl_stream_t *s);
+static int  bis_close(cl_stream_t *s);
+static void bis_destroy(cl_stream_t *s);
 
 static const cl_stream_ops_t buffer_input_ops = {
-  .read    = bis_read,  .write   = NULL,
-  .close   = bis_close, .flush   = NULL,
-  .finish  = NULL,      .listen  = bis_listen,
+  .read    = mem_cursor_read,  .write   = NULL,
+  .close   = bis_close,        .flush   = NULL,
+  .finish  = NULL,             .listen  = mem_cursor_listen,
   .destroy = bis_destroy,
-  .file_position = bis_file_position,
-  .set_file_position = bis_set_file_position,
-  .file_length    = bis_file_length,
+  .file_position = mem_cursor_file_position,
+  .set_file_position = mem_cursor_set_file_position,
+  .file_length    = mem_cursor_file_length,
 };
-
-typedef struct {
-  char   *data;
-  size_t  len;
-  size_t  pos;
-} buffer_input_full_t;
 
 cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
                                         ptrdiff_t start, ptrdiff_t end) {
@@ -124,7 +102,7 @@ cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
   char *data = buf_snapshot(env, buffer, start, end, &slen);
   if (!data) return NULL;
 
-  buffer_input_full_t *bi = calloc(1, sizeof(*bi));
+  mem_cursor_t *bi = calloc(1, sizeof(*bi));
   if (!bi) { free(data); return NULL; }
   bi->data = data; bi->len = slen; bi->pos = 0;
 
@@ -134,41 +112,14 @@ cl_stream_t *stream_create_buffer_input(emacs_env *env, emacs_value buffer,
   return s;
 }
 
-static ptrdiff_t bis_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
-  if (!s || !buf || n <= 0) return 0;
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (!bi) return 0;
-  return snapshot_read(bi->data, bi->len, &bi->pos, buf, n);
-}
-
 static int bis_close(cl_stream_t *s) {
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
+  mem_cursor_t *bi = (mem_cursor_t *)s->impl;
   if (bi) { free(bi->data); bi->data = NULL; bi->len = 0; bi->pos = 0; }
   atomic_store(&s->open, false);
   return 0;
 }
 
 static void bis_destroy(cl_stream_t *s) { free(s->impl); }
-static bool bis_listen(cl_stream_t *s) {
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  return bi != NULL && bi->pos < bi->len;
-}
-static ptrdiff_t bis_file_position(cl_stream_t *s) {
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (!bi) return -1;
-  return (ptrdiff_t)bi->pos;
-}
-static bool bis_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (!bi || pos < 0 || (size_t)pos > bi->len) return false;
-  bi->pos = (size_t)pos;
-  return true;
-}
-static ptrdiff_t bis_file_length(cl_stream_t *s) {
-  buffer_input_full_t *bi = (buffer_input_full_t *)s->impl;
-  if (!bi) return -1;
-  return (ptrdiff_t)bi->len;
-}
 
 emacs_value Fmake_buffer_input_stream(emacs_env *env, ptrdiff_t nargs,
                                        emacs_value *args, void *data) {
@@ -282,47 +233,33 @@ emacs_value Fmake_buffer_output_stream(emacs_env *env, ptrdiff_t nargs,
 
 /* ── buffer I/O stream (bidirectional) ────────────────────────────────── */
 
-static ptrdiff_t bds_read(cl_stream_t *s, void *buf, ptrdiff_t n);
 static ptrdiff_t bds_write(cl_stream_t *s, const void *buf, ptrdiff_t n);
 static ptrdiff_t bds_write_string(emacs_env *env, cl_stream_t *s, emacs_value str);
 static int       bds_close(cl_stream_t *s);
-static bool      bds_listen(cl_stream_t *s);
 static void      bds_destroy(cl_stream_t *s);
-static ptrdiff_t bds_file_position(cl_stream_t *s);
-static bool      bds_set_file_position(cl_stream_t *s, ptrdiff_t pos);
-static ptrdiff_t bds_file_length(cl_stream_t *s);
 
 const cl_stream_ops_t buffer_io_ops = {
-  .read         = bds_read,          .write        = bds_write,
-  .write_string = bds_write_string,  .close        = bds_close,
-  .flush        = NULL,              .finish       = NULL,
-  .listen       = bds_listen,        .destroy      = bds_destroy,
-  .file_position = bds_file_position,
-  .set_file_position = bds_set_file_position,
-  .file_length   = bds_file_length,
+  .read         = mem_cursor_read,      .write        = bds_write,
+  .write_string = bds_write_string,     .close        = bds_close,
+  .flush        = NULL,                 .finish       = NULL,
+  .listen       = mem_cursor_listen,    .destroy      = bds_destroy,
+  .file_position = mem_cursor_file_position,
+  .set_file_position = mem_cursor_set_file_position,
+  .file_length   = mem_cursor_file_length,
 };
 
 typedef struct {
-  char        *data;       /* snapshot at creation */
-  size_t       len;
-  size_t       pos;        /* shared read/write cursor */
-  strbuf_t    *sb;         /* accumulated byte writes */
-  emacs_value  buffer_ref; /* global ref */
+  mem_cursor_t cursor;      /* shared read/write snapshot cursor */
+  strbuf_t    *sb;          /* accumulated byte writes */
+  emacs_value  buffer_ref;  /* global ref */
 } buffer_io_full_t;
-
-static ptrdiff_t bds_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
-  if (!s || !buf || n <= 0) return 0;
-  buffer_io_full_t *bi = (buffer_io_full_t *)s->impl;
-  if (!bi || !bi->data) return 0;
-  return snapshot_read(bi->data, bi->len, &bi->pos, buf, n);
-}
 
 static ptrdiff_t bds_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
   if (!s || !buf || n <= 0) return 0;
   buffer_io_full_t *bi = (buffer_io_full_t *)s->impl;
   if (!bi) return -1;
   if (!strbuf_append(bi->sb, (const char *)buf, n)) return -1;
-  bi->pos += (size_t)n;
+  bi->cursor.pos += (size_t)n;
   return n;
 }
 
@@ -330,19 +267,14 @@ static ptrdiff_t bds_write_string(emacs_env *env, cl_stream_t *s, emacs_value st
   buffer_io_full_t *bi = (buffer_io_full_t *)s->impl;
   if (!bi) return -1;
   ptrdiff_t written = buffer_write_string(env, bi->buffer_ref, bi->sb, str);
-  if (written > 0) bi->pos += (size_t)written;
+  if (written > 0) bi->cursor.pos += (size_t)written;
   return written;
-}
-
-static bool bds_listen(cl_stream_t *s) {
-  buffer_io_full_t *bi = (buffer_io_full_t *)s->impl;
-  return bi && bi->data && bi->pos < bi->len;
 }
 
 static int bds_close(cl_stream_t *s) {
   buffer_io_full_t *bi = (buffer_io_full_t *)s->impl;
   if (bi) {
-    free(bi->data); bi->data = NULL;
+    free(bi->cursor.data); bi->cursor.data = NULL;
     strbuf_free(bi->sb); bi->sb = NULL;
   }
   atomic_store(&s->open, false);
@@ -350,25 +282,6 @@ static int bds_close(cl_stream_t *s) {
 }
 
 static void bds_destroy(cl_stream_t *s) { free(s->impl); }
-
-static ptrdiff_t bds_file_position(cl_stream_t *s) {
-  buffer_io_full_t *bi = (buffer_io_full_t *)s->impl;
-  if (!bi) return -1;
-  return (ptrdiff_t)bi->pos;
-}
-
-static bool bds_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
-  buffer_io_full_t *bi = (buffer_io_full_t *)s->impl;
-  if (!bi || pos < 0 || (size_t)pos > bi->len) return false;
-  bi->pos = (size_t)pos;
-  return true;
-}
-
-static ptrdiff_t bds_file_length(cl_stream_t *s) {
-  buffer_io_full_t *bi = (buffer_io_full_t *)s->impl;
-  if (!bi) return -1;
-  return (ptrdiff_t)bi->len;
-}
 
 cl_stream_t *stream_create_buffer_io(emacs_env *env, emacs_value buffer,
                                      ptrdiff_t start, ptrdiff_t end) {
@@ -378,19 +291,19 @@ cl_stream_t *stream_create_buffer_io(emacs_env *env, emacs_value buffer,
 
   buffer_io_full_t *bi = calloc(1, sizeof(*bi));
   if (!bi) { free(data); return NULL; }
-  bi->data = data; bi->len = slen; bi->pos = (size_t)start;
+  bi->cursor.data = data; bi->cursor.len = slen; bi->cursor.pos = (size_t)start;
   bi->buffer_ref = env->make_global_ref(env, buffer);
   bi->sb = strbuf_create(4096);
   if (!bi->sb) {
     env->free_global_ref(env, bi->buffer_ref);
-    free(bi->data); free(bi); return NULL;
+    free(bi->cursor.data); free(bi); return NULL;
   }
 
   cl_stream_t *s = stream_alloc(&buffer_io_ops, bi, CL_STREAM_KIND_BUFFER_IO,
                                 CL_STREAM_FLAG_INPUT | CL_STREAM_FLAG_OUTPUT);
   if (!s) {
     env->free_global_ref(env, bi->buffer_ref);
-    strbuf_free(bi->sb); free(bi->data); free(bi); return NULL;
+    strbuf_free(bi->sb); free(bi->cursor.data); free(bi); return NULL;
   }
   return s;
 }

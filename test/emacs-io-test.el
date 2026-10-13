@@ -5,7 +5,7 @@
 ;; Load the module
 (module-load (expand-file-name "../emacs-io.so" (file-name-directory load-file-name)))
 ;; Load the macros
-(load (expand-file-name "../src/emacs-io-macros.el" (file-name-directory load-file-name)))
+(load (expand-file-name "../lisp/emacs-io-macros.el" (file-name-directory load-file-name)))
 
 ;; ── Helpers ──────────────────────────────────────────────────────────────
 

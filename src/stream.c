@@ -8,6 +8,56 @@
 #define UNLOCK(s) pthread_mutex_unlock(&(s)->mutex)
 #define RESOLVE(s) do { if ((s)->ops && (s)->ops->resolve) (s)->ops->resolve(s); } while (0)
 
+/* ── shared in-memory cursor ─────────────────────────────────────────── */
+
+static mem_cursor_t *mem_cursor(cl_stream_t *s) {
+  return s ? (mem_cursor_t *)s->impl : NULL;
+}
+
+ptrdiff_t mem_cursor_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
+  mem_cursor_t *c = mem_cursor(s);
+  if (!c || !c->data || c->pos >= c->len || n <= 0) return 0;
+  size_t remaining = c->len - c->pos;
+  size_t to_copy = (size_t)n < remaining ? (size_t)n : remaining;
+  memcpy(buf, c->data + c->pos, to_copy);
+  c->pos += to_copy;
+  return (ptrdiff_t)to_copy;
+}
+
+bool mem_cursor_listen(cl_stream_t *s) {
+  mem_cursor_t *c = mem_cursor(s);
+  return c && c->data && c->pos < c->len;
+}
+
+ptrdiff_t mem_cursor_file_position(cl_stream_t *s) {
+  mem_cursor_t *c = mem_cursor(s);
+  return c ? (ptrdiff_t)c->pos : -1;
+}
+
+bool mem_cursor_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
+  mem_cursor_t *c = mem_cursor(s);
+  if (!c || pos < 0 || (size_t)pos > c->len) return false;
+  c->pos = (size_t)pos;
+  return true;
+}
+
+ptrdiff_t mem_cursor_file_length(cl_stream_t *s) {
+  mem_cursor_t *c = mem_cursor(s);
+  return c ? (ptrdiff_t)c->len : -1;
+}
+
+void mem_cursor_advance(cl_stream_t *s, ptrdiff_t n) {
+  mem_cursor_t *c = mem_cursor(s);
+  if (!c || n <= 0) return;
+  c->pos += (size_t)n;
+  if (c->pos > c->len) c->pos = c->len;
+}
+
+void mem_cursor_clear_input(cl_stream_t *s) {
+  mem_cursor_t *c = mem_cursor(s);
+  if (c) c->pos = c->len;
+}
+
 /* ── live-stream registry ────────────────────────────────────────────── */
 
 static pthread_mutex_t registry_mutex = PTHREAD_MUTEX_INITIALIZER;

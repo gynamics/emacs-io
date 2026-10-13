@@ -3,46 +3,14 @@
 
 #include "emacs-module.h"
 #include "stream.h"
+#include "syms.h"
+#include "strbuf.h"
 #include <stddef.h>
 
 /* ── runtime pointer (set once at init) ───────────────────────────────── */
 
 extern struct emacs_runtime *cl_rt;
 emacs_env *cl_env(void);
-
-/* ── pre-interned symbol table ────────────────────────────────────────── */
-
-typedef struct {
-  /* keyword symbols */
-  emacs_value k_direction, k_if_exists, k_if_does_not_exist;
-  emacs_value k_element_type, k_external_format;
-  emacs_value k_supersede, k_append, k_overwrite, k_error;
-  emacs_value k_start, k_end, k_size, k_stream;
-  emacs_value k_escape, k_radix, k_base, k_circle, k_pretty, k_level, k_length;
-  emacs_value k_case, k_gensym, k_array;
-  emacs_value k_preserve_whitespace, k_abort;
-
-  /* direction argument values (:input, :output, etc.) */
-  emacs_value d_input, d_output, d_io, d_probe;
-
-  /* Lisp function names */
-  emacs_value fn_car, fn_cdr, fn_list, fn_cons, fn_set;
-  emacs_value fn_symbol_value, fn_read_from_string, fn_prin1_to_string;
-  emacs_value fn_buffer_substring, fn_buffer_size;
-  emacs_value fn_error, fn_signal;
-
-  /* common values */
-  emacs_value v_nil, v_t, v_character, v_string;
-  emacs_value v_end_of_file;
-  emacs_value v_unsigned_byte_8;
-
-  /* standard stream variable names */
-  emacs_value var_sin, var_sout, var_serr;
-} syms_t;
-
-extern syms_t syms;
-
-void syms_init(emacs_env *env);
 
 /* ── cached API alternatives (avoid eintern on every call) ────────────── */
 
@@ -107,18 +75,5 @@ typedef enum {
    its length (1<<30 for a list, which is treated as unbounded).  Returns
    CL_SEQ_INVALID for anything else, with *len_out set to 0. */
 cl_seq_kind_t seq_classify(emacs_env *env, emacs_value seq, ptrdiff_t *len_out);
-
-/* ── string builder ───────────────────────────────────────────────────── */
-
-typedef struct {
-  char   *data;
-  size_t  len;
-  size_t  cap;
-} strbuf_t;
-
-strbuf_t *strbuf_create(size_t initial_cap);
-void      strbuf_free(strbuf_t *sb);
-bool      strbuf_append(strbuf_t *sb, const char *s, ptrdiff_t len);
-emacs_value strbuf_to_estring(emacs_env *env, strbuf_t *sb);
 
 #endif /* EMACS_IO_UTIL_H */

@@ -22,11 +22,14 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-$(SRC)/%.o: $(SRC)/%.c $(SRC)/stream.h $(SRC)/util.h $(SRC)/subrs.h Makefile
+HDRS     = $(SRC)/stream.h $(SRC)/util.h $(SRC)/subrs.h $(SRC)/syms.h $(SRC)/strbuf.h
+
+$(SRC)/%.o: $(SRC)/%.c $(HDRS) Makefile
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(TARGET) $(OBJS) $(TEST:.el=.elc) $(CONF:.el=.elc) $(BENCH:.el=.elc)
+	rm -f $(TARGET) $(OBJS) $(TEST:.el=.elc) $(CONF:.el=.elc) $(BENCH:.el=.elc) \
+	      lisp/emacs-io-macros.elc
 
 check: $(TARGET)
 	@echo "Module:   $(TARGET)"
@@ -42,9 +45,9 @@ verify: $(TARGET)
 		--eval '(message "emacs-io %d functions loaded" (length (apropos-internal "^cl-" (function fboundp))))'
 
 test: $(TARGET)
-	@rm -f $(TEST:.el=.elc) $(CONF:.el=.elc)
+	@rm -f $(TEST:.el=.elc) $(CONF:.el=.elc) lisp/emacs-io-macros.elc
 	@echo "=== unit tests ==="
-	@$(EMACS) --batch -Q -L $(SRC) -L $(TST) -l $(TEST) -l $(CONF) -f ert-run-tests-batch-and-exit
+	@$(EMACS) --batch -Q -L $(SRC) -L lisp -L $(TST) -l $(TEST) -l $(CONF) -f ert-run-tests-batch-and-exit
 
 bench: $(TARGET)
 	@rm -f $(BENCH:.el=.elc)

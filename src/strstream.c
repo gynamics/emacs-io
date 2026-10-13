@@ -6,30 +6,23 @@
 
 /* ── string-input ops ────────────────────────────────────────────────── */
 
-static ptrdiff_t sis_read(cl_stream_t *s, void *buf, ptrdiff_t n);
-static bool      sis_listen(cl_stream_t *s);
-static void      sis_destroy(cl_stream_t *s);
-static bool      sis_direct(cl_stream_t *s, const void **addr, size_t *len);
-static void      sis_advance(cl_stream_t *s, ptrdiff_t n);
-static void      sis_clear_input(cl_stream_t *s);
-static ptrdiff_t sis_file_position(cl_stream_t *s);
-static bool      sis_set_file_position(cl_stream_t *s, ptrdiff_t pos);
-static ptrdiff_t sis_file_length(cl_stream_t *s);
+static void sis_destroy(cl_stream_t *s);
+static bool sis_direct(cl_stream_t *s, const void **addr, size_t *len);
 
 static const cl_stream_ops_t string_input_ops = {
-  .read        = sis_read,
+  .read        = mem_cursor_read,
   .write       = NULL,
   .close       = NULL,   /* default: atomic store open=false */
   .flush       = NULL,
   .finish      = NULL,
-  .listen      = sis_listen,
+  .listen      = mem_cursor_listen,
   .destroy     = sis_destroy,
   .direct      = sis_direct,
-  .advance     = sis_advance,
-  .clear_input = sis_clear_input,
-  .file_position = sis_file_position,
-  .set_file_position = sis_set_file_position,
-  .file_length    = sis_file_length,
+  .advance     = mem_cursor_advance,
+  .clear_input = mem_cursor_clear_input,
+  .file_position = mem_cursor_file_position,
+  .set_file_position = mem_cursor_set_file_position,
+  .file_length    = mem_cursor_file_length,
 };
 
 /* ── string-output ops ───────────────────────────────────────────────── */
@@ -60,9 +53,9 @@ static const cl_stream_ops_t string_output_ops = {
 /* ── string input: create / read / close / listen ────────────────────── */
 
 cl_stream_t *stream_create_string_input(const char *data, size_t len) {
-  string_input_impl_t *si = malloc(sizeof(*si));
+  mem_cursor_t *si = malloc(sizeof(*si));
   if (!si) return NULL;
-  si->data = data;
+  si->data = (char *)data;   /* owned; freed by sis_destroy */
   si->len = len;
   si->pos = 0;
 
@@ -72,68 +65,17 @@ cl_stream_t *stream_create_string_input(const char *data, size_t len) {
   return s;
 }
 
-static ptrdiff_t sis_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
-  if (!s || !buf || n <= 0) return 0;
-  string_input_impl_t *si = (string_input_impl_t *)s->impl;
-  if (!si || si->pos >= si->len) return 0; /* EOF */
-
-  size_t remaining = si->len - si->pos;
-  size_t to_copy = (size_t)n < remaining ? (size_t)n : remaining;
-  memcpy(buf, si->data + si->pos, to_copy);
-  si->pos += to_copy;
-  return (ptrdiff_t)to_copy;
-}
-
 static void sis_destroy(cl_stream_t *s) {
-  string_input_impl_t *si = (string_input_impl_t *)s->impl;
-  if (si) {
-    free((void *)si->data);
-    free(si);
-  }
-}
-
-static bool sis_listen(cl_stream_t *s) {
-  string_input_impl_t *si = (string_input_impl_t *)s->impl;
-  return si != NULL && si->pos < si->len;
+  mem_cursor_t *si = (mem_cursor_t *)s->impl;
+  if (si) { free(si->data); free(si); }
 }
 
 static bool sis_direct(cl_stream_t *s, const void **addr, size_t *len) {
-  string_input_impl_t *si = (string_input_impl_t *)s->impl;
+  mem_cursor_t *si = (mem_cursor_t *)s->impl;
   if (!si || si->pos >= si->len) return false;
   *addr = si->data + si->pos;
   *len = si->len - si->pos;
   return true;
-}
-
-static void sis_advance(cl_stream_t *s, ptrdiff_t n) {
-  string_input_impl_t *si = (string_input_impl_t *)s->impl;
-  if (!si || n <= 0) return;
-  si->pos += (size_t)n;
-  if (si->pos > si->len) si->pos = si->len;
-}
-
-static void sis_clear_input(cl_stream_t *s) {
-  string_input_impl_t *si = (string_input_impl_t *)s->impl;
-  if (si) si->pos = si->len;  /* skip all remaining data */
-}
-
-static ptrdiff_t sis_file_position(cl_stream_t *s) {
-  string_input_impl_t *si = (string_input_impl_t *)s->impl;
-  if (!si) return -1;
-  return (ptrdiff_t)si->pos;
-}
-
-static bool sis_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
-  string_input_impl_t *si = (string_input_impl_t *)s->impl;
-  if (!si || pos < 0 || (size_t)pos > si->len) return false;
-  si->pos = (size_t)pos;
-  return true;
-}
-
-static ptrdiff_t sis_file_length(cl_stream_t *s) {
-  string_input_impl_t *si = (string_input_impl_t *)s->impl;
-  if (!si) return -1;
-  return (ptrdiff_t)si->len;
 }
 
 /* ── string output: block-chain (no realloc copying) ────────────────────*/
@@ -353,7 +295,7 @@ emacs_value Fmake_string_input(emacs_env *env, ptrdiff_t nargs,
     signal_error(env, "Cannot create string input stream");
     return syms.v_nil;
   }
-  string_input_impl_t *si = (string_input_impl_t *)s->impl;
+  mem_cursor_t *si = (mem_cursor_t *)s->impl;
   si->pos = (size_t)start;
   si->len = (size_t)end;
 

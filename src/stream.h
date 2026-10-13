@@ -128,12 +128,22 @@ typedef struct {
   bool    owns_fd;
 } mmap_stream_impl_t;
 
-/* string input stream */
+/* Shared cursor for snapshot-backed in-memory streams (string input,
+   buffer input, buffer I/O).  Placed first in each impl struct so the
+   mem_cursor_* ops can reach it via `(mem_cursor_t *)s->impl'. */
 typedef struct {
-  const char *data;
-  size_t      len;
-  size_t      pos;
-} string_input_impl_t;
+  char   *data;   /* owned snapshot; NULL for an empty buffer */
+  size_t  len;
+  size_t  pos;
+} mem_cursor_t;
+
+ptrdiff_t mem_cursor_read(cl_stream_t *s, void *buf, ptrdiff_t n);
+bool      mem_cursor_listen(cl_stream_t *s);
+ptrdiff_t mem_cursor_file_position(cl_stream_t *s);
+bool      mem_cursor_set_file_position(cl_stream_t *s, ptrdiff_t pos);
+ptrdiff_t mem_cursor_file_length(cl_stream_t *s);
+void      mem_cursor_advance(cl_stream_t *s, ptrdiff_t n);
+void      mem_cursor_clear_input(cl_stream_t *s);
 
 /* string output stream — block-chain, no realloc copies */
 typedef struct str_block {
