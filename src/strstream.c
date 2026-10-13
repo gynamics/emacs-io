@@ -7,7 +7,6 @@
 /* ── string-input ops ────────────────────────────────────────────────── */
 
 static void sis_destroy(cl_stream_t *s);
-static bool sis_direct(cl_stream_t *s, const void **addr, size_t *len);
 
 static const cl_stream_ops_t string_input_ops = {
   .read        = mem_cursor_read,
@@ -17,7 +16,7 @@ static const cl_stream_ops_t string_input_ops = {
   .finish      = NULL,
   .listen      = mem_cursor_listen,
   .destroy     = sis_destroy,
-  .direct      = sis_direct,
+  .direct      = mem_cursor_direct,
   .advance     = mem_cursor_advance,
   .clear_input = mem_cursor_clear_input,
   .file_position = mem_cursor_file_position,
@@ -68,14 +67,6 @@ cl_stream_t *stream_create_string_input(const char *data, size_t len) {
 static void sis_destroy(cl_stream_t *s) {
   mem_cursor_t *si = (mem_cursor_t *)s->impl;
   if (si) { free(si->data); free(si); }
-}
-
-static bool sis_direct(cl_stream_t *s, const void **addr, size_t *len) {
-  mem_cursor_t *si = (mem_cursor_t *)s->impl;
-  if (!si || si->pos >= si->len) return false;
-  *addr = si->data + si->pos;
-  *len = si->len - si->pos;
-  return true;
 }
 
 /* ── string output: block-chain (no realloc copying) ────────────────────*/

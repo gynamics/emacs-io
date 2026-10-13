@@ -323,6 +323,58 @@
     (cl-conf--in sym
       (should (equal (cl-read s) (intern sym))))))
 
+(ert-deftest cl-conf-read-line-from-file ()
+  "cl-read-line over a real file stream (feed via the fd window)."
+  (cl-conf--tmp f
+    (with-temp-file f
+      (dotimes (i 1000) (insert (format "row %d\n" i))))
+    (let ((s (cl-open f :direction :input)))
+      (unwind-protect
+          (let ((n 0) last line)
+            (while (setq line (car (cl-read-line s nil nil)))
+              (setq n (1+ n) last line))
+            (should (= n 1000))
+            (should (equal last "row 999")))
+        (cl-close s)))))
+
+(ert-deftest cl-conf-read-from-file ()
+  "cl-read over a file stream reads every object (fd window)."
+  (cl-conf--tmp f
+    (with-temp-file f
+      (dotimes (i 200) (insert (format "(%d . %d)\n" i (* i i)))))
+    (let ((s (cl-open f :direction :input)))
+      (unwind-protect
+          (progn
+            (dotimes (i 200)
+              (should (equal (cl-read s) (cons i (* i i)))))
+            (should (eq (cl-read s nil :eof) :eof)))
+        (cl-close s)))))
+
+(ert-deftest cl-conf-read-line-across-concatenated ()
+  "cl-read-line spans the seam of a concatenated stream."
+  (let ((a (cl-make-string-input-stream "one\ntwo"))
+        (b (cl-make-string-input-stream "\nthree\n")))
+    (let ((cc (cl-make-concatenated-stream a b)))
+      (unwind-protect
+          (progn
+            (should (equal (car (cl-read-line cc)) "one"))
+            (should (equal (car (cl-read-line cc)) "two"))
+            (should (equal (car (cl-read-line cc)) "three"))
+            (should (eq (car (cl-read-line cc nil :eof)) :eof)))
+        (cl-close cc)))))
+
+(ert-deftest cl-conf-read-line-from-buffer-stream ()
+  "cl-read-line over a buffer-input stream (mem_cursor window)."
+  (with-temp-buffer
+    (insert "alpha\nbeta\ngamma")
+    (let ((s (cl-make-buffer-input-stream (current-buffer))))
+      (unwind-protect
+          (progn
+            (should (equal (car (cl-read-line s)) "alpha"))
+            (should (equal (car (cl-read-line s)) "beta"))
+            (should (equal (cl-read-line s) '("gamma" . t))))
+        (cl-close s)))))
+
 ;; ── WRITE-CHAR / WRITE-STRING / WRITE-LINE / WRITE-BYTE ───────────────────
 
 (ert-deftest cl-conf-write-char-returns-char ()

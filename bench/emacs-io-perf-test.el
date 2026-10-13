@@ -243,8 +243,8 @@ and copies back out."
 
 (ert-deftest emacs-io-perf-line-read-10k ()
   "10K lines: cl-read-line vs buffer-substring+forward-line.
-Emacs' C-level `forward-line' scan outruns per-line stream reads, so this is
-reported without a win assertion (see the README performance notes)."
+The line reader scans the stream's buffered window and advances exactly, so
+it is competitive with the C-level `forward-line'."
   (let ((text (emacs-io-perf--with-string-output
                 (dotimes (_ 10000)
                   (cl-write-line "the quick brown fox jumps over the lazy dog" stream)))))
@@ -267,12 +267,10 @@ reported without a win assertion (see the README performance notes)."
                (forward-line 1)
                (setq n (1+ n)))
              n))))
-      (lambda (a b) (and (= a b) (= a 10000)))
-      nil)))                                  ; buffer line scan wins
+      (lambda (a b) (and (= a b) (= a 10000))))))
 
 (ert-deftest emacs-io-perf-comint-10k ()
-  "10K lines comint-sim: incremental arrival, stream read-line vs buffer insert+scan.
-Like `line-read-10k', the buffer idiom is faster, so no win assertion."
+  "10K lines comint-sim: incremental arrival, stream read-line vs buffer insert+scan."
   (let ((text (emacs-io-perf--with-string-output
                 (dotimes (_ 10000)
                   (cl-write-line "proc: test output line here" stream)))))
@@ -301,8 +299,7 @@ Like `line-read-10k', the buffer idiom is faster, so no win assertion."
                  (delete-region (point-min) (line-beginning-position))
                  (setq pos end)))
              n))))
-      (lambda (a b) (and (= a b) (= a 10000)))
-      nil)))                                  ; buffer scan wins
+      (lambda (a b) (and (= a b) (= a 10000))))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Category 4 — application scenarios (real-world I/O patterns)
@@ -344,9 +341,7 @@ buffer (the incremental insert+scan case is covered by comint-10k)."
 ;; ── log parsing: grep for pattern across many lines ──────────────────────
 
 (ert-deftest emacs-io-perf-log-grep-10k ()
-  "10K lines log-grep: per-line string-match on both sides.
-Dominated by the same per-line stream read as `line-read-10k', so no win
-assertion."
+  "10K lines log-grep: per-line string-match on both sides."
   (let* ((n 10000)
          (text (emacs-io-perf--with-string-output
                  (dotimes (i n)
@@ -374,8 +369,7 @@ assertion."
                  (setq n (1+ n)))
                (forward-line 1))
              n))))
-      (lambda (a b) (and (= a b) (= a 100)))
-      nil)))                                  ; buffer scan wins
+      (lambda (a b) (and (= a b) (= a 100))))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 

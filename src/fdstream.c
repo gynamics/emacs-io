@@ -18,6 +18,8 @@ static bool      fds_listen(cl_stream_t *s);
 static void      fds_destroy(cl_stream_t *s);
 static void      fds_clear_input(cl_stream_t *s);
 static void      fds_clear_output(cl_stream_t *s);
+static bool      fds_direct(cl_stream_t *s, const void **addr, size_t *len);
+static void      fds_advance(cl_stream_t *s, ptrdiff_t n);
 static ptrdiff_t fds_file_position(cl_stream_t *s);
 static bool      fds_set_file_position(cl_stream_t *s, ptrdiff_t pos);
 static ptrdiff_t fds_file_length(cl_stream_t *s);
@@ -31,6 +33,8 @@ static const cl_stream_ops_t fd_stream_ops = {
   .finish       = fds_finish,
   .listen       = fds_listen,
   .destroy      = fds_destroy,
+  .direct       = fds_direct,
+  .advance      = fds_advance,
   .clear_input  = fds_clear_input,
   .clear_output = fds_clear_output,
   .file_position = fds_file_position,
@@ -148,6 +152,33 @@ static ptrdiff_t fds_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
     dest[total++] = fi->rbuf[fi->rpos++];
   }
   return total;
+}
+
+/* ── zero-copy window ─────────────────────────────────────────────────── */
+
+/* Expose the buffered input without consuming it (refilling if empty) so a
+   reader can scan for a line/object boundary and then advance exactly. */
+static bool fds_direct(cl_stream_t *s, const void **addr, size_t *len) {
+  fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
+  if (!fi || fi->fd < 0) return false;
+  if (!(s->flags & CL_STREAM_FLAG_INPUT)) return false;
+
+  if (fi->rpos >= fi->rlen) {
+    ssize_t r = read(fi->fd, fi->rbuf, fi->rsz);
+    if (r <= 0) return false;             /* EOF or EAGAIN */
+    fi->rlen = (size_t)r;
+    fi->rpos = 0;
+  }
+  *addr = fi->rbuf + fi->rpos;
+  *len = fi->rlen - fi->rpos;
+  return true;
+}
+
+static void fds_advance(cl_stream_t *s, ptrdiff_t n) {
+  fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
+  if (!fi || n <= 0) return;
+  if ((size_t)n >= fi->rlen - fi->rpos) fi->rpos = fi->rlen;
+  else fi->rpos += (size_t)n;
 }
 
 /* ── write ────────────────────────────────────────────────────────────── */

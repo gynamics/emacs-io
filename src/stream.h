@@ -16,10 +16,11 @@
 #define CL_STREAM_FLAG_INTERACTIVE (1u << 3)
 #define CL_STREAM_FLAG_BINARY      (1u << 4)
 
-/* Pushback ring capacity (a power of two).  Must exceed the largest read
-   chunk the reader pushes back: cl-read / cl-read-line read 4096 bytes and
-   return the unconsumed tail, so the ring holds up to 4095 chars. */
-#define CL_PUSHBACK_SIZE 8192
+/* Pushback ring capacity (a power of two).  It only holds characters
+   returned by cl-unread-char / cl-peek-char; readers scan a non-consuming
+   window (stream_direct) instead of over-reading a chunk, so a small ring
+   suffices and no data can be lost. */
+#define CL_PUSHBACK_SIZE 256
 
 /* ── forward declarations ─────────────────────────────────────────────── */
 
@@ -91,10 +92,9 @@ struct cl_stream {
   _Atomic bool           open;
   mode_t                 file_mode;   /* from fstat, 0 if not fd-backed */
 
-  /* pushback ring buffer for unread.  Sized to hold a full read chunk:
-     cl-read / cl-read-line read up to 4096 bytes at a time and push the
-     unconsumed tail back, so a 256-entry ring would silently drop data for
-     any line/form larger than the ring (issue: short lines over-read). */
+  /* pushback ring buffer for cl-unread-char / cl-peek-char.  Readers use
+     the non-consuming window (stream_direct) rather than pushing an
+     over-read tail here, so this stays small. */
   int                    pushback_chars[CL_PUSHBACK_SIZE];
   int                    pushback_head;
   int                    pushback_tail;
@@ -146,6 +146,7 @@ typedef struct {
 } mem_cursor_t;
 
 ptrdiff_t mem_cursor_read(cl_stream_t *s, void *buf, ptrdiff_t n);
+bool      mem_cursor_direct(cl_stream_t *s, const void **addr, size_t *len);
 bool      mem_cursor_listen(cl_stream_t *s);
 ptrdiff_t mem_cursor_file_position(cl_stream_t *s);
 bool      mem_cursor_set_file_position(cl_stream_t *s, ptrdiff_t pos);
@@ -216,9 +217,11 @@ int       stream_flush(cl_stream_t *s);
 int       stream_finish(cl_stream_t *s);
 bool      stream_listen(cl_stream_t *s);
 void      stream_unread(cl_stream_t *s, int ch);
-/* Push N bytes back in one lock acquisition; used by readers that over-read
-   a chunk and return the unconsumed tail. */
+/* Push N bytes back in one lock acquisition. */
 void      stream_unread_bulk(cl_stream_t *s, const unsigned char *data, ptrdiff_t n);
+/* Drain only the pushback ring into BUF (up to N bytes), leaving the
+   underlying window untouched.  Used by the readers before they scan. */
+ptrdiff_t stream_read_pushback(cl_stream_t *s, void *buf, ptrdiff_t n);
 bool      stream_direct(cl_stream_t *s, const void **addr, size_t *len);
 void      stream_advance(cl_stream_t *s, ptrdiff_t n);
 ptrdiff_t stream_file_position(cl_stream_t *s);

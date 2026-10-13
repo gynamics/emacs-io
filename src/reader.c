@@ -33,7 +33,20 @@ emacs_value Fread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
 /* ── cl-read-line ─────────────────────────────────────────────────────── */
 
-#define READ_LINE_CHUNK 4096
+/* Scan P[0..N) for a line terminator.  On success set *NL to its index and
+   *SKIP to the bytes to consume (1 for \n or a lone \r, 2 for \r\n). */
+static bool scan_newline(const unsigned char *p, size_t n,
+                         ptrdiff_t *nl, ptrdiff_t *skip) {
+  for (size_t i = 0; i < n; i++) {
+    if (p[i] == '\n') { *nl = (ptrdiff_t)i; *skip = 1; return true; }
+    if (p[i] == '\r') {
+      *nl = (ptrdiff_t)i;
+      *skip = (i + 1 < n && p[i + 1] == '\n') ? 2 : 1;
+      return true;
+    }
+  }
+  return false;
+}
 
 emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                        void *data) {
@@ -41,46 +54,51 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
   check_open(env, s, "cl-read-line");
 
-  strbuf_t *sb = strbuf_create(4096);
+  strbuf_t *sb = strbuf_create(256);
   if (!sb) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
 
-  unsigned char chunk[READ_LINE_CHUNK];
   bool saw_newline = false;
 
-  for (;;) {
-    ptrdiff_t r = stream_read(s, chunk, sizeof(chunk));
-    if (r <= 0) break;
-
-    ptrdiff_t nl_off = -1;
-    ptrdiff_t skip = 1;  /* bytes to skip for newline (1 for \n, 2 for \r\n) */
-
-    for (ptrdiff_t i = 0; i < r; i++) {
-      if (chunk[i] == '\n') { nl_off = i; skip = 1; break; }
-      if (chunk[i] == '\r') {
-        if (i + 1 < r && chunk[i + 1] == '\n')
-          { nl_off = i; skip = 2; break; }
-        nl_off = i; skip = 1; break;
-      }
-    }
-
-    if (nl_off >= 0) {
-      if (!strbuf_append(sb, (const char *)chunk, nl_off)) {
+  /* Unread characters (cl-unread-char) precede the buffered window. */
+  {
+    unsigned char pb[CL_PUSHBACK_SIZE];
+    ptrdiff_t npb = stream_read_pushback(s, pb, (ptrdiff_t)sizeof(pb));
+    if (npb > 0) {
+      ptrdiff_t nl, skip;
+      if (scan_newline(pb, (size_t)npb, &nl, &skip)) {
+        strbuf_append(sb, (const char *)pb, nl);
+        if (nl + skip < npb)
+          stream_unread_bulk(s, pb + nl + skip, npb - (nl + skip));
+        saw_newline = true;
+      } else if (!strbuf_append(sb, (const char *)pb, npb)) {
         strbuf_free(sb);
         signal_error(env, "Memory allocation failed");
         return syms.v_nil;
       }
-      /* push leftover in forward order (FIFO queue: first in → first out) */
-      if (nl_off + skip < r)
-        stream_unread_bulk(s, chunk + nl_off + skip, r - (nl_off + skip));
-      saw_newline = true;
-      break;
     }
+  }
 
-    /* no newline found — keep accumulating */
-    if (!strbuf_append(sb, (const char *)chunk, r)) {
-      strbuf_free(sb);
-      signal_error(env, "Memory allocation failed");
-      return syms.v_nil;
+  /* Scan successive non-consuming windows; advance only past the newline. */
+  while (!saw_newline) {
+    const void *addr; size_t wlen;
+    if (!stream_direct(s, &addr, &wlen) || wlen == 0) break;   /* EOF */
+
+    ptrdiff_t nl, skip;
+    if (scan_newline((const unsigned char *)addr, wlen, &nl, &skip)) {
+      if (!strbuf_append(sb, (const char *)addr, nl)) {
+        strbuf_free(sb);
+        signal_error(env, "Memory allocation failed");
+        return syms.v_nil;
+      }
+      stream_advance(s, nl + skip);
+      saw_newline = true;
+    } else {
+      if (!strbuf_append(sb, (const char *)addr, (ptrdiff_t)wlen)) {
+        strbuf_free(sb);
+        signal_error(env, "Memory allocation failed");
+        return syms.v_nil;
+      }
+      stream_advance(s, (ptrdiff_t)wlen);
     }
   }
 
@@ -411,107 +429,54 @@ emacs_value Fread_chunk(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 }
 
 /* ── cl-read / cl-read-preserving-whitespace ──────────────────────────────
-   These stay in C (rather than moving to the Lisp layer) because reading a
-   form needs stream_read, which drains the pushback ring; the Lisp-visible
-   bulk primitives such as cl-read-chunk bypass it via the zero-copy path. */
+   Reading scans a non-consuming window of the stream (stream_direct) and
+   advances by exactly the consumed count (stream_advance).  The stream
+   refills its buffer on demand, so nothing is over-read and no pushback is
+   needed: reading many lines/objects is linear and cannot lose data. */
 
-/* Try to read one form from the accumulated buffer SB.  On success stores
-   the value in *result and its consumed byte count in *consumed and returns
-   true.  Returns false when SB only holds an incomplete form, leaving a
-   genuine (non-EOF) reader error pending for the caller to notice. */
-static bool try_read_from_buffer(emacs_env *env, strbuf_t *sb,
-                                  emacs_value *result, ptrdiff_t *consumed) {
-  emacs_value estr = env->make_string(env, sb->data, (ptrdiff_t)sb->len);
-  emacs_value read_args[2];
-  read_args[0] = estr;
-  read_args[1] = eint(env, 0);
-
-  emacs_value raw = env->funcall(env, syms.fn_read_from_string,
-                                  2, read_args);
-
-  enum emacs_funcall_exit exit = env->non_local_exit_check(env);
-  if (exit == emacs_funcall_exit_return) {
-    emacs_value pair = raw;
-    *result = efuncall_cached(env, syms.fn_car, 1, &pair);
-    emacs_value pos  = efuncall_cached(env, syms.fn_cdr, 1, &pair);
-    *consumed = eint_extract(env, pos);
-    return true;
-  }
-
-  emacs_value sym = syms.v_nil;
-  emacs_value data = syms.v_nil;
-  env->non_local_exit_get(env, &sym, &data);
-  bool is_eof = env->eq(env, sym, syms.v_end_of_file);
-  env->non_local_exit_clear(env);
-
-  if (is_eof)
-    return false;
-
-  env->non_local_exit_signal(env, sym, data);
-  *consumed = 0;
-  return false;
-}
-
-/* Drop trailing whitespace from SB (used when a form is unfinished at
-   EOF, e.g. "(1 2 " should still parse as the list (1 2)). */
-static void trim_trailing_whitespace(strbuf_t *sb) {
-  while (sb->len > 0) {
-    char c = sb->data[sb->len - 1];
-    if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f')
-      sb->data[--sb->len] = '\0';
-    else
-      break;
-  }
-}
-
-/* Read chunks from S into SB until one complete form can be parsed.
-   Returns true and stores the value and its byte length in *result and
-   *consumed.  Returns false when EOF is reached first; a pending non-local
-   exit (a genuine reader error) is left for the caller to notice. */
-static bool read_object_from_stream(emacs_env *env, cl_stream_t *s,
-                                    strbuf_t *sb, emacs_value *result,
-                                    ptrdiff_t *consumed) {
-  unsigned char chunk[4096];
-  for (;;) {
-    if (sb->len > 0) {
-      if (try_read_from_buffer(env, sb, result, consumed)) {
-        /* A form that consumed the whole buffer might be the prefix of a
-           longer token split across a chunk boundary (e.g. the digits 412
-           ending one read and 345 starting the next).  Unless the parse
-           stopped at a delimiter inside the buffer, keep reading until a
-           delimiter or EOF confirms the token is complete. */
-        if (*consumed < (ptrdiff_t)sb->len)
-          return true;
-        unsigned char more;
-        if (stream_read(s, &more, 1) <= 0)
-          return true;                 /* EOF: the form is complete */
-        strbuf_append(sb, (const char *)&more, 1);
-        continue;                       /* re-parse with the extra byte */
-      }
-      if (env->non_local_exit_check(env) != emacs_funcall_exit_return)
-        return false;
-    }
-
-    ptrdiff_t r = stream_read(s, chunk, sizeof(chunk));
-    if (r <= 0) {
-      /* At EOF, strip trailing whitespace and try once more. */
-      trim_trailing_whitespace(sb);
-      if (sb->len > 0 && try_read_from_buffer(env, sb, result, consumed))
-        return true;
-      return false;
-    }
-
-    strbuf_append(sb, (const char *)chunk, r);
-  }
-}
+/* Cap the window bytes handed to read-from-string in one call, so a small
+   form on a large buffered stream does not copy the whole buffer to parse. */
+#define READ_WINDOW_CAP 4096
 
 static bool read_ws_byte(char c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
 }
 
+/* Parse one form from DATA[0..LEN).  Sets *obj and *pos and returns 1 on
+   success; returns 0 when DATA holds only the start of a form; returns -1
+   with a pending non-local exit on a genuine reader error. */
+static int try_parse(emacs_env *env, const char *data, ptrdiff_t len,
+                     emacs_value *obj, ptrdiff_t *pos) {
+  emacs_value estr = env->make_string(env, data, len);
+  emacs_value raw = efuncall_cached(env, syms.fn_read_from_string, 1, &estr);
+  if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
+    emacs_value sym = syms.v_nil, data2 = syms.v_nil;
+    env->non_local_exit_get(env, &sym, &data2);
+    bool is_eof = env->eq(env, sym, syms.v_end_of_file);
+    env->non_local_exit_clear(env);
+    if (is_eof) return 0;                 /* incomplete */
+    env->non_local_exit_signal(env, sym, data2);
+    return -1;
+  }
+  *obj = efuncall_cached(env, syms.fn_car, 1, &raw);
+  *pos = eint_extract(env, efuncall_cached(env, syms.fn_cdr, 1, &raw));
+  return 1;
+}
+
+/* Consume up to END bytes of the logical stream: SB holds the bytes already
+   consumed for this form, so any of SB past END is pushed back and bytes
+   used from the current window are advanced. */
+static void finish_form(cl_stream_t *s, strbuf_t *sb, ptrdiff_t end) {
+  if (end < (ptrdiff_t)sb->len)
+    stream_unread_bulk(s, (const unsigned char *)sb->data + end,
+                       (ptrdiff_t)sb->len - end);
+  else if (end > (ptrdiff_t)sb->len)
+    stream_advance(s, end - (ptrdiff_t)sb->len);
+}
+
 /* Shared by cl-read and cl-read-preserving-whitespace.  With PRESERVE_WS
    false, the single whitespace character that delimits the object is
-   discarded, as CL's reader does; with true it is pushed back. */
+   discarded, as CL's reader does; with true it is left in the stream. */
 static emacs_value read_form(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                              bool preserve_ws) {
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
@@ -520,31 +485,89 @@ static emacs_value read_form(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     return syms.v_nil;
   }
 
-  strbuf_t *sb = strbuf_create(256);
+  strbuf_t *sb = strbuf_create(256);   /* bytes already consumed for this form */
   if (!sb) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
 
-  emacs_value result = syms.v_nil;
-  ptrdiff_t consumed = 0;
-  bool parsed = read_object_from_stream(env, s, sb, &result, &consumed);
+  /* Unread characters precede the buffered window. */
+  {
+    unsigned char pb[CL_PUSHBACK_SIZE];
+    ptrdiff_t npb = stream_read_pushback(s, pb, (ptrdiff_t)sizeof(pb));
+    if (npb > 0) strbuf_append(sb, (const char *)pb, npb);
+  }
 
-  if (!parsed) {
-    bool reader_error =
-      env->non_local_exit_check(env) != emacs_funcall_exit_return;
+  emacs_value result = syms.v_nil;
+  bool have = false;
+  ptrdiff_t end = 0;
+
+  /* A form wholly inside the (small) pushback prefix, ending at a delimiter,
+     is final.  A token ending exactly at the buffer end is not: it could
+     continue in the stream, so wait for more input. */
+  if (sb->len > 0) {
+    emacs_value obj; ptrdiff_t pos;
+    int r = try_parse(env, sb->data, (ptrdiff_t)sb->len, &obj, &pos);
+    if (r < 0) { strbuf_free(sb); return syms.v_nil; }
+    if (r == 1 && pos < (ptrdiff_t)sb->len) {
+      result = obj; end = pos;
+      if (!preserve_ws && read_ws_byte(sb->data[end])) end++;
+      have = true;
+    }
+  }
+
+  while (!have) {
+    const void *addr; size_t wlen;
+    if (!stream_direct(s, &addr, &wlen) || wlen == 0) {
+      /* End of input. */
+      if (sb->len > 0) {
+        emacs_value obj; ptrdiff_t pos;
+        int r = try_parse(env, sb->data, (ptrdiff_t)sb->len, &obj, &pos);
+        if (r < 0) { strbuf_free(sb); return syms.v_nil; }
+        if (r == 1) {
+          result = obj; end = pos;
+          if (!preserve_ws && end < (ptrdiff_t)sb->len &&
+              read_ws_byte(sb->data[end])) end++;
+          have = true;
+        } else {
+          /* An incomplete object at EOF is an error (CL). */
+          strbuf_free(sb);
+          signal_end_of_file(env, s);
+          return syms.v_nil;
+        }
+      }
+      break;
+    }
+
+    size_t use = wlen < READ_WINDOW_CAP ? wlen : READ_WINDOW_CAP;
+
+    strbuf_t *comb = strbuf_create(sb->len + use + 1);
+    if (!comb) { strbuf_free(sb); signal_error(env, "Memory allocation failed"); return syms.v_nil; }
+    strbuf_append(comb, sb->data, (ptrdiff_t)sb->len);
+    strbuf_append(comb, (const char *)addr, (ptrdiff_t)use);
+
+    emacs_value obj; ptrdiff_t pos;
+    int r = try_parse(env, comb->data, (ptrdiff_t)comb->len, &obj, &pos);
+
+    if (r == 1 && pos < (ptrdiff_t)comb->len) {
+      end = pos;
+      if (!preserve_ws && read_ws_byte(comb->data[end])) end++;
+      result = obj; have = true;
+      strbuf_free(comb);
+      break;
+    }
+    strbuf_free(comb);
+    if (r < 0) { strbuf_free(sb); return syms.v_nil; }
+
+    /* Incomplete, or complete but ending at the window edge (the token may
+       continue in the next block): consume the block and read more. */
+    strbuf_append(sb, (const char *)addr, (ptrdiff_t)use);
+    stream_advance(s, (ptrdiff_t)use);
+  }
+
+  if (!have) {
     strbuf_free(sb);
-    if (reader_error) return syms.v_nil;   /* propagate the pending error */
     return eof_result(env, s, nargs, args, 1, 2);
   }
 
-  /* Push back the unconsumed bytes; when not preserving whitespace, drop
-     the one delimiting whitespace character first. */
-  ptrdiff_t first = consumed;
-  if (!preserve_ws && first < (ptrdiff_t)sb->len &&
-      read_ws_byte(sb->data[first]))
-    first++;
-  if (first < (ptrdiff_t)sb->len)
-    stream_unread_bulk(s, (const unsigned char *)sb->data + first,
-                       (ptrdiff_t)sb->len - first);
-
+  finish_form(s, sb, end);
   strbuf_free(sb);
   return result;
 }
@@ -563,9 +586,7 @@ emacs_value Fread_preserving_whitespace(emacs_env *env, ptrdiff_t nargs,
 
 /* ── cl-read-delimited-list ───────────────────────────────────────────
    (cl-read-delimited-list char &optional stream recursive-p)
-   Read objects from STREAM until CHAR is seen, return them as a list.
-   Kept in C alongside cl-read: it reads characters one at a time, so it
-   must not go through cl-read's pushback-sensitive chunk reader. */
+   Read objects from STREAM until CHAR is seen, return them as a list. */
 
 /* Try to parse one complete form from the front of SB.  On success stores
    the value in *val and the number of consumed bytes in *pos and returns

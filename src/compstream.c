@@ -100,6 +100,17 @@ static bool syn_listen(cl_stream_t *s) {
   return stream_listen(t);
 }
 
+static bool syn_direct(cl_stream_t *s, const void **addr, size_t *len) {
+  cl_stream_t *t = syn_target(s);
+  if (!t || !stream_is_open(t)) return false;
+  return stream_direct(t, addr, len);
+}
+
+static void syn_advance(cl_stream_t *s, ptrdiff_t n) {
+  cl_stream_t *t = syn_target(s);
+  if (t && stream_is_open(t)) stream_advance(t, n);
+}
+
 static int syn_close(cl_stream_t *s) {
   atomic_store(&s->open, false);
   return 0;
@@ -136,6 +147,8 @@ static const cl_stream_ops_t synonym_stream_ops = {
   .finish        = NULL,
   .listen        = syn_listen,
   .destroy       = syn_destroy,
+  .direct        = syn_direct,
+  .advance       = syn_advance,
   .file_position = syn_file_position,
   .set_file_position = syn_set_file_position,
   .file_length   = syn_file_length,
@@ -268,6 +281,23 @@ static bool concat_listen(cl_stream_t *s) {
   return false;
 }
 
+/* Window from the first non-exhausted constituent. */
+static bool concat_direct(cl_stream_t *s, const void **addr, size_t *len) {
+  concat_impl_t *ci = (concat_impl_t *)s->impl;
+  if (!ci) return false;
+  while (ci->current < ci->count) {
+    if (stream_direct(ci->streams[ci->current], addr, len)) return true;
+    ci->current++;
+  }
+  return false;
+}
+
+static void concat_advance(cl_stream_t *s, ptrdiff_t n) {
+  concat_impl_t *ci = (concat_impl_t *)s->impl;
+  if (ci && ci->current < ci->count)
+    stream_advance(ci->streams[ci->current], n);
+}
+
 static int concat_close(cl_stream_t *s) {
   /* CL: closing a constructed stream does not close its constituents. */
   atomic_store(&s->open, false);
@@ -284,6 +314,8 @@ static const cl_stream_ops_t concat_stream_ops = {
   .close   = concat_close,
   .listen  = concat_listen,
   .destroy = concat_destroy,
+  .direct  = concat_direct,
+  .advance = concat_advance,
 };
 
 /* ── constructors ────────────────────────────────────────────────────── */
@@ -342,6 +374,30 @@ static ptrdiff_t dx_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
   return r;
 }
 
+static bool dx_direct(cl_stream_t *s, const void **addr, size_t *len) {
+  cl_stream_t *in = ((duplex_impl_t *)s->impl)->input;
+  if (!in || !stream_is_open(in)) return false;
+  return stream_direct(in, addr, len);
+}
+
+static void dx_advance(cl_stream_t *s, ptrdiff_t n) {
+  cl_stream_t *in = ((duplex_impl_t *)s->impl)->input;
+  if (in && stream_is_open(in)) stream_advance(in, n);
+}
+
+/* An echo stream must copy the consumed bytes to its output. */
+static void echo_advance(cl_stream_t *s, ptrdiff_t n) {
+  duplex_impl_t *d = (duplex_impl_t *)s->impl;
+  cl_stream_t *in = d->input;
+  if (!in || !stream_is_open(in)) return;
+  if (d->echo && n > 0 && d->output && stream_is_open(d->output)) {
+    const void *addr; size_t len;
+    if (stream_direct(in, &addr, &len) && (size_t)n <= len)
+      stream_write(d->output, addr, n);
+  }
+  stream_advance(in, n);
+}
+
 static ptrdiff_t dx_write(cl_stream_t *s, const void *buf, ptrdiff_t n) {
   cl_stream_t *out = ((duplex_impl_t *)s->impl)->output;
   if (!out || !stream_is_open(out)) return 0;
@@ -394,6 +450,7 @@ static const cl_stream_ops_t twoway_stream_ops = {
   .listen  = dx_listen, .close   = dx_close,
   .destroy = dx_destroy,
   .flush   = dx_flush,  .finish  = dx_finish,
+  .direct  = dx_direct, .advance = dx_advance,
   .clear_output = dx_clear_output, .clear_input = dx_clear_input,
   .write_string  = dx_write_string,
 };
@@ -403,6 +460,7 @@ static const cl_stream_ops_t echo_stream_ops = {
   .listen  = dx_listen, .close   = dx_close,
   .destroy = dx_destroy,
   .flush   = dx_flush,
+  .direct  = dx_direct, .advance = echo_advance,
   .clear_output = dx_clear_output, .clear_input = dx_clear_input,
   .write_string  = dx_write_string,
 };

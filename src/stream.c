@@ -24,6 +24,14 @@ ptrdiff_t mem_cursor_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
   return (ptrdiff_t)to_copy;
 }
 
+bool mem_cursor_direct(cl_stream_t *s, const void **addr, size_t *len) {
+  mem_cursor_t *c = mem_cursor(s);
+  if (!c || !c->data || c->pos >= c->len) return false;
+  *addr = c->data + c->pos;
+  *len = c->len - c->pos;
+  return true;
+}
+
 bool mem_cursor_listen(cl_stream_t *s) {
   mem_cursor_t *c = mem_cursor(s);
   return c && c->data && c->pos < c->len;
@@ -228,6 +236,19 @@ void stream_unread_bulk(cl_stream_t *s, const unsigned char *data, ptrdiff_t n) 
     s->pushback_tail = next;
   }
   UNLOCK(s);
+}
+
+ptrdiff_t stream_read_pushback(cl_stream_t *s, void *buf, ptrdiff_t n) {
+  if (!s || !buf || n <= 0) return 0;
+  LOCK(s);
+  ptrdiff_t count = 0;
+  unsigned char *dest = (unsigned char *)buf;
+  while (s->pushback_head != s->pushback_tail && count < n) {
+    dest[count++] = (unsigned char)s->pushback_chars[s->pushback_head];
+    s->pushback_head = (s->pushback_head + 1) & (CL_PUSHBACK_SIZE - 1);
+  }
+  UNLOCK(s);
+  return count;
 }
 
 bool stream_direct(cl_stream_t *s, const void **addr, size_t *len) {
