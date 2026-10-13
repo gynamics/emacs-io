@@ -12,8 +12,7 @@ typedef struct {
   emacs_value k_element_type, k_external_format;
   emacs_value k_supersede, k_append, k_overwrite, k_error;
   emacs_value k_start, k_end, k_size, k_stream;
-  emacs_value k_escape, k_radix, k_base, k_circle, k_pretty, k_level, k_length;
-  emacs_value k_case, k_gensym, k_array;
+  emacs_value k_escape, k_circle, k_pretty, k_level, k_length, k_gensym;
   emacs_value k_preserve_whitespace, k_abort;
 
   /* direction argument values (:input, :output, etc.) */

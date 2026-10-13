@@ -119,7 +119,8 @@ static bool resolve_open_flags(emacs_env *env, const open_options_t *o,
     if (o->dir == OPEN_OUTPUT || o->dir == OPEN_IO) {
       struct stat st;
       if (stat(filename, &st) == 0) {
-        signal_error(env, "File already exists (default :if-exists is :error)");
+        signal_error_type(env, "file-error",
+                          "File already exists (default :if-exists is :error)");
         return false;
       }
     }
@@ -210,7 +211,7 @@ emacs_value Fopen(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     char buf[256];
     snprintf(buf, sizeof(buf), "Cannot open file: %s", strerror(saved_errno));
     free(filename);
-    signal_error(env, buf);
+    signal_error_type(env, "file-error", buf);
     return syms.v_nil;
   }
 

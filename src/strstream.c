@@ -178,8 +178,9 @@ static ptrdiff_t sos_write_string(emacs_env *env, cl_stream_t *s, emacs_value st
 
   size_t n = (size_t)(slen - 1);
 
-  /* if tail block has room, write directly into it */
-  if (sos_tail_fits(so, n)) {
+  /* if the tail block has room (N bytes plus the NUL copy_string_contents
+     always writes), write directly into it */
+  if (sos_tail_fits(so, n + 1)) {
     char *dest = so->tail->data + so->tail->len;
     ptrdiff_t copied = slen;
     if (!env->copy_string_contents(env, str, dest, &copied)) return -1;

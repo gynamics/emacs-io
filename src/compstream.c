@@ -43,7 +43,7 @@ static emacs_value streams_to_list(emacs_env *env, cl_stream_t **streams,
                                    ptrdiff_t count) {
   emacs_value lst = syms.v_nil;
   for (ptrdiff_t i = count - 1; i >= 0; i--) {
-    emacs_value pair[2] = { euser_ptr_stream_make(env, streams[i]), lst };
+    emacs_value pair[2] = { euser_ptr_stream_ref(env, streams[i]), lst };
     lst = efuncall_cached(env, syms.fn_cons, 2, pair);
   }
   return lst;
@@ -523,7 +523,7 @@ emacs_value Ftwo_way_stream_input_stream(emacs_env *env, ptrdiff_t nargs,
   cl_stream_t *s = require_stream_of(env, args[0], &twoway_stream_ops,
                                      "Not a two-way stream");
   if (!s) return syms.v_nil;
-  return euser_ptr_stream_make(env, ((duplex_impl_t *)s->impl)->input);
+  return euser_ptr_stream_ref(env, ((duplex_impl_t *)s->impl)->input);
 }
 
 emacs_value Ftwo_way_stream_output_stream(emacs_env *env, ptrdiff_t nargs,
@@ -532,7 +532,7 @@ emacs_value Ftwo_way_stream_output_stream(emacs_env *env, ptrdiff_t nargs,
   cl_stream_t *s = require_stream_of(env, args[0], &twoway_stream_ops,
                                      "Not a two-way stream");
   if (!s) return syms.v_nil;
-  return euser_ptr_stream_make(env, ((duplex_impl_t *)s->impl)->output);
+  return euser_ptr_stream_ref(env, ((duplex_impl_t *)s->impl)->output);
 }
 
 emacs_value Fmake_echo_stream(emacs_env *env, ptrdiff_t nargs,
@@ -556,7 +556,7 @@ emacs_value Fecho_stream_input_stream(emacs_env *env, ptrdiff_t nargs,
   cl_stream_t *s = require_stream_of(env, args[0], &echo_stream_ops,
                                      "Not an echo stream");
   if (!s) return syms.v_nil;
-  return euser_ptr_stream_make(env, ((duplex_impl_t *)s->impl)->input);
+  return euser_ptr_stream_ref(env, ((duplex_impl_t *)s->impl)->input);
 }
 
 emacs_value Fecho_stream_output_stream(emacs_env *env, ptrdiff_t nargs,
@@ -565,5 +565,5 @@ emacs_value Fecho_stream_output_stream(emacs_env *env, ptrdiff_t nargs,
   cl_stream_t *s = require_stream_of(env, args[0], &echo_stream_ops,
                                      "Not an echo stream");
   if (!s) return syms.v_nil;
-  return euser_ptr_stream_make(env, ((duplex_impl_t *)s->impl)->output);
+  return euser_ptr_stream_ref(env, ((duplex_impl_t *)s->impl)->output);
 }

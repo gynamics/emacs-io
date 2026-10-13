@@ -267,7 +267,8 @@ emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   /* CL: start and end must be valid bounding indices. */
   if (start < 0 || end < 0 || end < start ||
       ((is_vec || is_str) && (start > len || end > len))) {
-    signal_error(env, "cl-write-sequence: invalid bounding index");
+    signal_error_type(env, "args-out-of-range",
+                      "cl-write-sequence: invalid bounding index");
     return syms.v_nil;
   }
   ptrdiff_t count = end - start;
@@ -287,10 +288,16 @@ emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   if (is_str) {
-    unsigned char *buf = malloc((size_t)count);
+    /* copy_string_contents writes the whole string (LEN + NUL), not just the
+       :START..:END slice, so size the buffer for the full string. */
+    unsigned char *buf = malloc((size_t)len + 1);
     if (!buf) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
     ptrdiff_t copied = len + 1;
-    env->copy_string_contents(env, seq, (char *)buf, &copied);
+    if (!env->copy_string_contents(env, seq, (char *)buf, &copied)) {
+      free(buf);
+      signal_error(env, "cl-write-sequence: cannot extract string");
+      return syms.v_nil;
+    }
     stream_write(s, buf + start, count);
     free(buf);
     return seq;

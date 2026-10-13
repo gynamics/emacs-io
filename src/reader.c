@@ -266,7 +266,8 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   /* CL: start and end must be valid bounding indices. */
   if (start < 0 || end < 0 || end < start ||
       ((is_vec || is_str) && (start > len || end > len))) {
-    signal_error(env, "cl-read-sequence: invalid bounding index");
+    signal_error_type(env, "args-out-of-range",
+                      "cl-read-sequence: invalid bounding index");
     return syms.v_nil;
   }
   ptrdiff_t count = end - start;

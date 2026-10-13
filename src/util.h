@@ -45,7 +45,9 @@ void provide(emacs_env *env, const char *feature);
 /* ── stream <-> emacs_value helpers ────────────────────────────────────── */
 
 cl_stream_t *euser_ptr_stream_get(emacs_env *env, emacs_value val);
-emacs_value  euser_ptr_stream_make(emacs_env *env, cl_stream_t *s);
+emacs_value  euser_ptr_stream_make(emacs_env *env, cl_stream_t *s);  /* owns S */
+/* Non-owning handle (does not free S when collected). */
+emacs_value  euser_ptr_stream_ref(emacs_env *env, cl_stream_t *s);
 /* Wrap S as a Lisp stream object.  If S is NULL, signal ERRMSG and
    return nil.  Convenience for the "construct or fail" tails. */
 emacs_value  stream_or_error(emacs_env *env, cl_stream_t *s, const char *errmsg);
@@ -54,6 +56,8 @@ void check_open(emacs_env *env, cl_stream_t *s, const char *op);
 /* ── error signaling ──────────────────────────────────────────────────── */
 
 void signal_error(emacs_env *env, const char *msg);
+/* Signal (TYPE "MSG"), e.g. TYPE = "file-error" / "args-out-of-range". */
+void signal_error_type(emacs_env *env, const char *type, const char *msg);
 void signal_end_of_file(emacs_env *env, cl_stream_t *s);
 
 /* Resolve end-of-file for a reader whose EOF-ERROR-P is ARGS[ERR_IDX] and

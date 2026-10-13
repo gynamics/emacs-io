@@ -453,15 +453,13 @@ static const subr_def_t subrs[] = {
   { "cl-write", Fwrite, 1, 15,
     "Write OBJECT to STREAM.\n"
     "\n"
-    "Accepts standard CL print-control keyword arguments.  Most bind\n"
-    "the corresponding Emacs print-* variable during output:\n"
-    "  :RADIX → print-radix    :BASE → print-base\n"
-    "  :CIRCLE → print-circle  :PRETTY → print-pretty\n"
-    "  :LEVEL → print-level    :LENGTH → print-length\n"
-    "  :CASE → print-case      :GENSYM → print-gensym\n"
-    "  :ARRAY → print-array\n"
-    ":ESCAPE is emulated: nil prints without escaping (princ-style).\n"
-    ":READABLY is accepted for compatibility and ignored.\n"
+    "Keywords with an Emacs counterpart are bound during output:\n"
+    "  :CIRCLE → print-circle  :LEVEL → print-level\n"
+    "  :LENGTH → print-length  :GENSYM → print-gensym\n"
+    ":ESCAPE nil prints without escaping (princ-style); :PRETTY t uses\n"
+    "Emacs' pretty-printer.  The remaining CL controls (:BASE :RADIX\n"
+    ":CASE :ARRAY :READABLY and the pprint controls) are accepted for\n"
+    "compatibility and ignored.\n"
     "\n(fn OBJECT &key STREAM ESCAPE RADIX BASE CIRCLE PRETTY LEVEL LENGTH CASE GENSYM ARRAY READABLY RIGHT-MARGIN MISER-WIDTH PPRINT-DISPATCH LINES)" },
 
   { "cl-prin1", Fprin1, 1, 2,

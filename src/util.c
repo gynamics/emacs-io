@@ -125,6 +125,15 @@ emacs_value euser_ptr_stream_make(emacs_env *env, cl_stream_t *s) {
   return env->make_user_ptr(env, stream_user_ptr_finalizer, s);
 }
 
+/* A non-owning handle: the stream is not freed when this user-ptr is
+   collected.  Used for accessor results and for the stream object carried
+   in an end-of-file condition, which must not take ownership. */
+static void stream_user_ptr_ref_finalizer(void *ptr) { (void)ptr; }
+
+emacs_value euser_ptr_stream_ref(emacs_env *env, cl_stream_t *s) {
+  return env->make_user_ptr(env, stream_user_ptr_ref_finalizer, s);
+}
+
 emacs_value stream_or_error(emacs_env *env, cl_stream_t *s, const char *errmsg) {
   if (!s) {
     signal_error(env, errmsg);
@@ -141,8 +150,15 @@ void signal_error(emacs_env *env, const char *msg) {
   efuncall_cached(env, syms.fn_error, 1, args);
 }
 
+void signal_error_type(emacs_env *env, const char *type, const char *msg) {
+  emacs_value data = efuncall_cached(env, syms.fn_list, 1,
+                                     (emacs_value[]){ estring(env, msg) });
+  emacs_value args[2] = { eintern(env, type), data };
+  efuncall_cached(env, syms.fn_signal, 2, args);
+}
+
 void signal_end_of_file(emacs_env *env, cl_stream_t *s) {
-  emacs_value sv = euser_ptr_stream_make(env, s);
+  emacs_value sv = euser_ptr_stream_ref(env, s);
   emacs_value data = efuncall_cached(env, syms.fn_list, 1, &sv);
   emacs_value args[2] = { syms.v_end_of_file, data };
   efuncall_cached(env, syms.fn_signal, 2, args);
@@ -176,15 +192,11 @@ void syms_init(emacs_env *env) {
   syms.k_size         = G(eintern(env, ":size"));
   syms.k_stream       = G(eintern(env, ":stream"));
   syms.k_escape       = G(eintern(env, ":escape"));
-  syms.k_radix        = G(eintern(env, ":radix"));
-  syms.k_base         = G(eintern(env, ":base"));
   syms.k_circle       = G(eintern(env, ":circle"));
   syms.k_pretty       = G(eintern(env, ":pretty"));
   syms.k_level        = G(eintern(env, ":level"));
   syms.k_length       = G(eintern(env, ":length"));
-  syms.k_case         = G(eintern(env, ":case"));
   syms.k_gensym       = G(eintern(env, ":gensym"));
-  syms.k_array        = G(eintern(env, ":array"));
   syms.k_preserve_whitespace = G(eintern(env, ":preserve-whitespace"));
   syms.k_abort        = G(eintern(env, ":abort"));
 

@@ -178,7 +178,7 @@ emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
     env->non_local_exit_clear(env);
     free(str);
     if (!eoferr) return eofval;
-    signal_error(env, "End of file on string");
+    signal_error_type(env, "end-of-file", "End of file on string");
     return syms.v_nil;
   }
 
@@ -187,7 +187,7 @@ emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
   if (pos == 0 && end > start) {
     free(str);
     if (!eoferr) return eofval;
-    signal_error(env, "End of file on string");
+    signal_error_type(env, "end-of-file", "End of file on string");
     return syms.v_nil;
   }
 
@@ -210,7 +210,12 @@ emacs_value Fread_from_string(emacs_env *env, ptrdiff_t nargs,
 /* CL print-control keywords cl-write accepts, each paired with the Emacs
    variable it should temporarily bind during printing.  :escape and
    :readably have no Emacs variable and are handled separately below. */
-#define N_PRINT_CONTROLS 9
+/* CL print-control keywords whose Emacs variable actually exists (so it can
+   be dynamically bound).  The others (:base :radix :pretty :case :array
+   :readably :lines :miser-width :pprint-dispatch :right-margin) have no
+   Emacs counterpart and are accepted and ignored -- except :escape and
+   :pretty, handled specially below. */
+#define N_PRINT_CONTROLS 4
 
 emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                     void *data) {
@@ -223,17 +228,13 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   emacs_value obj = args[0];
   cl_stream_t *s = NULL;
   bool escape_present = false, escape_value = false;
+  bool pretty_present = false, pretty_value = false;
 
   const struct { emacs_value key; const char *var; } controls[N_PRINT_CONTROLS] = {
-    { syms.k_radix,    "print-radix"    },
-    { syms.k_base,     "print-base"     },
-    { syms.k_circle,   "print-circle"   },
-    { syms.k_pretty,   "print-pretty"   },
-    { syms.k_level,    "print-level"    },
-    { syms.k_length,   "print-length"   },
-    { syms.k_case,     "print-case"     },
-    { syms.k_gensym,   "print-gensym"   },
-    { syms.k_array,    "print-array"    },
+    { syms.k_circle, "print-circle" },
+    { syms.k_level,  "print-level"  },
+    { syms.k_length, "print-length" },
+    { syms.k_gensym, "print-gensym" },
   };
 
   emacs_value values[N_PRINT_CONTROLS];
@@ -253,8 +254,11 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
       escape_value = env->is_not_nil(env, args[i + 1]);
       continue;
     }
-    /* :readably is accepted for compatibility and ignored (Emacs' printer
-       never signals print-not-readable). */
+    if (kw_eq_cached(env, key, syms.k_pretty)) {
+      pretty_present = true;
+      pretty_value = env->is_not_nil(env, args[i + 1]);
+      continue;
+    }
     for (int j = 0; j < N_PRINT_CONTROLS; j++) {
       if (kw_eq_cached(env, key, controls[j].key)) {
         values[j] = args[i + 1];
@@ -274,12 +278,15 @@ emacs_value Fwrite(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   }
 
   /* Emacs has no `print-escape'; emulate it via prin1 (escaped) vs the
-     princ-style `(format "%s" obj)' (unescaped). */
+     princ-style `(format "%s" obj)' (unescaped).  :pretty routes through
+     Emacs' pretty-printer. */
   emacs_value str;
   if (escape_present && !escape_value) {
     emacs_value fmt = estring(env, "%s");
     emacs_value fa[2] = { fmt, obj };
     str = efuncall(env, "format", 2, fa);
+  } else if (pretty_present && pretty_value) {
+    str = efuncall(env, "pp-to-string", 1, &obj);
   } else {
     str = efuncall_cached(env, syms.fn_prin1_to_string, 1, &obj);
   }
