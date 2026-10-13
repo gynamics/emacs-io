@@ -1,7 +1,7 @@
 ;;; emacs-io-conformance-test.el --- CL conformance tests -*- lexical-binding: t; -*-
 ;;
 ;; Boundary-case tests for the cl-* stream interfaces, written against the
-;; ANSI Common Lisp specification (CLHS).  See CONFORMANCE.md for the audit.
+;; ANSI Common Lisp specification (CLHS).
 ;;
 ;; Note: cl-fresh-line / cl-prin1 are probed at load time (not inside a test
 ;; lambda) to avoid the ERT byte-compiler quirk described in AGENTS.md.
@@ -202,9 +202,12 @@
       (should (equal lst (list ?a ?b ?c))))))
 
 (ert-deftest cl-conf-read-sequence-bad-start-signals ()
-  "CL: start must be a valid bounding index."
+  "CL: start must be a valid bounding index (an out-of-range error)."
   (cl-conf--in "abc"
-    (should-error (cl-read-sequence (make-vector 3 0) s :start 99))))
+    (should-error (cl-read-sequence (make-vector 3 0) s :start 99)
+                  :type 'args-out-of-range)
+    (should-error (cl-write-sequence (make-vector 3 0) s :start 99)
+                  :type 'args-out-of-range)))
 
 (ert-deftest cl-conf-write-sequence-returns-sequence ()
   (let ((v [72 105]))
@@ -267,7 +270,7 @@
 
 (ert-deftest cl-conf-read-from-string-eof ()
   (should (eq (cl-read-from-string "" nil :eof) :eof))
-  (should-error (cl-read-from-string "")))
+  (should-error (cl-read-from-string "") :type 'end-of-file))
 
 ;; ── READ-DELIMITED-LIST ───────────────────────────────────────────────────
 
@@ -402,7 +405,7 @@
   "CL: pprint returns no values (represented as nil)."
   (let ((s (cl-make-string-output-stream)))
     (should (null (cl-pprint 42 s)))
-    (should (string-match-p "\\`42" (cl-get-output-stream-string s)))
+    (should (equal (cl-get-output-stream-string s) "42\n"))
     (cl-close s)))
 
 (ert-deftest cl-conf-to-string ()
@@ -437,13 +440,14 @@
 
 (ert-deftest cl-conf-open-if-does-not-exist-error ()
   (should-error (cl-open "/nonexistent-emacs-io-conf" :direction :input
-                         :if-does-not-exist :error)))
+                         :if-does-not-exist :error)
+                :type 'file-error))
 
 (ert-deftest cl-conf-open-default-if-exists-errors ()
   "CL: default :if-exists is :error."
   (cl-conf--tmp f
     (with-temp-file f (insert "OLD"))
-    (should-error (cl-open f :direction :output))
+    (should-error (cl-open f :direction :output) :type 'file-error)
     ;; the file must be left untouched
     (should (equal (with-temp-buffer (insert-file-contents f) (buffer-string)) "OLD"))))
 
@@ -569,7 +573,7 @@
     (should (cl-streamp s))))                ; still a stream when closed
 
 (ert-deftest cl-conf-streamp-non-streams ()
-  "CL: streamp is true only for streams (see CONFORMANCE.md re: user-ptrs)."
+  "CL: streamp is true only for streams."
   (should-not (cl-streamp (make-hash-table)))
   (should-not (cl-streamp [1 2]))
   (should-not (cl-streamp 'sym))
@@ -674,6 +678,64 @@
     (cl-write-char 955 s)                 ; λ
     (should (equal (cl-get-output-stream-string s) "λ"))
     (cl-close s)))
+
+;; ── additional coverage ───────────────────────────────────────────────────
+
+(ert-deftest cl-conf-read-chunk ()
+  "cl-read-chunk returns (CHUNK . EOF-P) and advances the cursor."
+  (cl-conf--in "hello world"
+    (let ((a (cl-read-chunk s 5)))
+      (should (equal (car a) "hello"))
+      (should-not (cdr a)))              ; more data remains
+    (let ((b (cl-read-chunk s 100)))
+      (should (equal (car b) " world"))
+      (should (cdr b)))                  ; reached end of file
+    (let ((c (cl-read-chunk s 5)))
+      (should (equal (car c) ""))
+      (should (cdr c)))))
+
+(ert-deftest cl-conf-file-string-length ()
+  "cl-file-string-length is the byte count of the printed object."
+  (let ((s (cl-make-string-output-stream)))
+    (should (equal (cl-file-string-length s "abc") 5))   ; "\"abc\""
+    (should (equal (cl-file-string-length s 42) 2))
+    (cl-close s)))
+
+(ert-deftest cl-conf-broadcast-stream-streams ()
+  "cl-broadcast-stream-streams returns the constituent streams."
+  (let ((a (cl-make-string-output-stream))
+        (b (cl-make-string-output-stream)))
+    (let ((bc (cl-make-broadcast-stream a b)))
+      (should (equal (length (cl-broadcast-stream-streams bc)) 2))
+      (cl-close bc))
+    (cl-close a) (cl-close b)))
+
+(ert-deftest cl-conf-file-stream-write ()
+  "Writing (with :start/:end, and cl-write) to a file stream."
+  (cl-conf--tmp f
+    (let ((s (cl-open f :direction :output :if-exists :supersede)))
+      (cl-write-string "abc" s :start 1 :end 2)   ; "b"
+      (cl-write "x" :stream s)                    ; "\"x\""
+      (cl-close s))
+    (should (equal (with-temp-buffer (insert-file-contents f) (buffer-string))
+                   "b\"x\""))))
+
+(ert-deftest cl-conf-write-keywords ()
+  "cl-write accepts every CL print control; unsupported ones are ignored."
+  (should (equal (cl-write-to-string "hi" :escape nil) "hi"))
+  ;; these have no Emacs variable, so they are accepted and ignored
+  (should (equal (cl-write-to-string 255 :base 16) "255"))
+  (should (equal (cl-write-to-string 'abc :case :downcase) "abc"))
+  (should (equal (cl-write-to-string '(1 2) :array t) "(1 2)"))
+  ;; :pretty routes through Emacs' pretty-printer
+  (should (stringp (cl-write-to-string '(1 (2 3)) :pretty t))))
+
+(ert-deftest cl-conf-unread-char-permissive ()
+  "emacs-io tolerates repeated unread-char (CL allows only one)."
+  (cl-conf--in "x"
+    (dotimes (_ 100) (cl-unread-char ?z s))
+    (should (equal (cl-read-char s) ?z))
+    (should (equal (cl-read-char s) ?z))))
 
 (provide 'emacs-io-conformance-test)
 ;;; emacs-io-conformance-test.el ends here

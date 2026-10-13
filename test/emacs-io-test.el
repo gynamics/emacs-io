@@ -192,11 +192,6 @@ CL: skip characters until CHAR is found, then leave CHAR in the stream."
 ;; (Emacs 31.0.90) that causes (invalid-function #<user-ptr ...>).
 ;; The affected tests are marked :tags '(:ert-quirk).
 
-(ert-deftest emacs-io-test-string-output-fresh-line ()
-  "Test fresh-line."
-  :tags '(:ert-quirk)
-  (cl-fresh-line))  ;; without stream arg — exercises the C code safely
-
 (ert-deftest emacs-io-test-print-trailing-space ()
   "Test cl-print includes trailing space."
   (let ((result (emacs-io-test--with-string-output
@@ -377,39 +372,18 @@ CL: skip characters until CHAR is found, then leave CHAR in the stream."
 
 ;; ── Lisp Printer ─────────────────────────────────────────────────────────
 
-(ert-deftest emacs-io-test-write-prin1 ()
-  "Test cl-prin1 output (stream path tested indirectly via round-trip)."
-  :tags '(:ert-quirk)
-  (should (equal (cl-prin1-to-string "hello") "\"hello\"")))
-
-(ert-deftest emacs-io-test-write-princ ()
-  "Test cl-princ output (no string quoting)."
-  (should (equal (cl-princ-to-string "hello") "hello")))
-
-(ert-deftest emacs-io-test-write-numbers ()
-  "Test writing numbers (stream path tested indirectly via round-trip)."
-  :tags '(:ert-quirk)
-  (should (equal (cl-prin1-to-string 42) "42")))
-
-(ert-deftest emacs-io-test-write-symbol ()
-  "Test writing a symbol (stream path tested indirectly via round-trip)."
-  :tags '(:ert-quirk)
-  (should (equal (cl-prin1-to-string 'hello) "hello")))
-
-(ert-deftest emacs-io-test-write-list ()
-  "Test writing a list (stream path tested indirectly via round-trip)."
-  :tags '(:ert-quirk)
+(ert-deftest emacs-io-test-prin1-to-string ()
+  "cl-prin1-to-string produces READable output."
+  (should (equal (cl-prin1-to-string "hi") "\"hi\""))
+  (should (equal (cl-prin1-to-string 42) "42"))
+  (should (equal (cl-prin1-to-string 'hello) "hello"))
   (should (equal (cl-prin1-to-string '(a b c)) "(a b c)")))
 
-(ert-deftest emacs-io-test-prin1-to-string ()
-  "Test cl-prin1-to-string."
-  (should (equal (cl-prin1-to-string "hi") "\"hi\""))
-  (should (equal (cl-prin1-to-string 42) "42")))
-
 (ert-deftest emacs-io-test-princ-to-string ()
-  "Test cl-princ-to-string."
+  "cl-princ-to-string produces human-readable output (no string quotes)."
   (should (equal (cl-princ-to-string "hi") "hi"))
-  (should (equal (cl-princ-to-string 42) "42")))
+  (should (equal (cl-princ-to-string 42) "42"))
+  (should (equal (cl-princ-to-string '(a b c)) "(a b c)")))
 
 (ert-deftest emacs-io-test-write-to-string ()
   "Test cl-write-to-string."
@@ -597,10 +571,10 @@ CL: skip characters until CHAR is found, then leave CHAR in the stream."
 ;; ── cl-print ──────────────────────────────────────────────────────────────
 
 (ert-deftest emacs-io-test-cl-print ()
-  "Test cl-print outputs newline before object."
+  "cl-print outputs a newline, the object, then a space."
   (let ((result (emacs-io-test--with-string-output
-                  (cl-print "hello" stream))))
-    (should (string-prefix-p "\n\"hello\"" result))))
+                  (cl-print 5 stream))))
+    (should (equal result "\n5 "))))
 
 ;; ── cl-write ──────────────────────────────────────────────────────────────
 
@@ -774,10 +748,10 @@ CL: skip characters until CHAR is found, then leave CHAR in the stream."
 ;; ── Pretty Print ────────────────────────────────────────────────────────
 
 (ert-deftest emacs-io-test-pprint ()
-  "Test cl-pprint with a string output stream."
+  "cl-pprint pretty-prints the object to the stream (pp-to-string adds \\n)."
   (let ((result (emacs-io-test--with-string-output
                   (cl-pprint 42 stream))))
-    (should (string-match-p "\\`42" result))))
+    (should (equal result "42\n"))))
 
 ;; ── Query I/O ───────────────────────────────────────────────────────────
 
@@ -830,8 +804,9 @@ CL: skip characters until CHAR is found, then leave CHAR in the stream."
                (should-not (cl-file-regular-p s)))
       (cl-close s))))
 
-(ert-deftest emacs-io-test-mem-leak ()
-  "1000 create-write-destroy cycles; should not crash."
+(ert-deftest emacs-io-test-stream-churn ()
+  "1000 create/write/close cycles complete without crashing.
+(Not a leak check — run under valgrind/ASan for that.)"
   (dotimes (_ 1000)
     (let ((s (cl-make-string-output-stream)))
       (cl-write-string "hello world" s)
