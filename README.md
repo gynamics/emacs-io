@@ -22,7 +22,7 @@ ring buffers, zero copy within string streams, and no hook machinery.
 
 ```bash
 make                  # → emacs-io-core.so
-make test             # 223 tests: unit + Common Lisp conformance
+make test             # 226 tests: unit + Common Lisp conformance
 make bench            # 12 performance benchmarks
 ```
 
@@ -249,24 +249,38 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 
 ## Performance
 
-All numbers from Emacs 31.0.90, Linux x86-64, GCC 14 `-O2`.  Every test
-compares stream I/O against the most efficient Emacs native equivalent.
+All numbers from Emacs 31, Linux x86-64, GCC, `-O2`, best of 5 timed runs
+after a warmup (`make bench`, `EMACS_IO_BENCH_FULL=1` for the 10 MB cases).
+Every test compares stream I/O against the most efficient Emacs native
+equivalent.
 
 | Test | Stream | Buffer | Speedup |
 |---|---|---|---|
-| `cl-read-sequence` 100 K elements | 2.2 ms | 34.6 ms | **15.9×** |
-| `cl-write-sequence` 100 K elements | 2.5 ms | 31.8 ms | **12.9×** |
-| Log grep 10 K lines | 1.7 ms | 4.8 ms | **2.9×** |
-| Comint incremental 10 K lines | 1.6 ms | 4.7 ms | **2.9×** |
-| Per-char write 100 K | 19.5 ms | 35.5 ms | **1.8×** |
-| Line read 10 K lines | 2.0 ms | 3.3 ms | **1.6×** |
+| `cl-read-sequence` 100 K elements | 2.1 ms | 20.0 ms | **9.7×** |
+| `cl-write-sequence` 100 K elements | 2.2 ms | 28.5 ms | **12.8×** |
+| `cl-read-string` 10 MB (file) | 1.1 ms | 10.6 ms | **9.8×** |
+| `cl-open`+write+read 10 MB | 7.1 ms | 39.0 ms | **5.5×** |
+| fd write 10 MB | 6.0 ms | 28.4 ms | **4.8×** |
+| `cl-read-chunk` 1 MB (4 KB chunks) | 0.16 ms | 0.53 ms | **3.3×** |
+| `cl-read-string` 10 MB (4 KB chunks) | 2.0 ms | 5.7 ms | **2.8×** |
+| per-char write 100 K | 17.4 ms | 27.2 ms | **1.6×** |
+| accumulate + write 10 MB | 16.6 ms | 29.6 ms | **1.8×** |
 
-Sequence I/O wins by **16×** by eliminating per-element C↔Lisp crossings:
+Sequence I/O wins by **10–13×** by eliminating per-element C↔Lisp crossings:
 a single C `memcpy` of 100 KB replaces 100,000 iterations of `(aset vec i
-(char-after ...))`.  File I/O wins by **10×** via raw `write(2)` bypassing
-`write-region` encoding and mode hooks.  Line processing uses a 4 KB
-bulk-chunk scanner with C-level newline detection instead of per-byte
-dispatch.
+(char-after ...))`.  File I/O wins by **5–10×** via raw `read(2)`/`write(2)`
+and zero-copy mmap reads, bypassing `write-region` encoding and mode hooks.
+
+**Line reading is a known weakness.**  `make bench` also measures
+`cl-read-line` (and the `log-grep`/`comint` patterns built on it): it is
+**slower** than `forward-line` + `buffer-substring` (≈24 ms vs ≈3 ms for
+10 K lines), because the generic stream API can only *consume* — to return a
+line the reader must over-read a chunk and push the unconsumed tail back
+through the pushback ring.  Those benchmarks therefore check correctness but
+do not assert a speedup.  A backend-specific `read-line` that scans a stream's
+own buffer with `memchr` (as `cl-read-sequence`/`cl-read-string` do) would fix
+this; use `cl-read-sequence`/`cl-read-string`/buffers for hot line processing
+meanwhile.
 
 ## Architecture
 
