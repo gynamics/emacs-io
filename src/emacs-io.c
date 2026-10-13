@@ -140,13 +140,6 @@ static const subr_def_t subrs[] = {
     "Returns BYTE.\n"
     "\n(fn BYTE STREAM)" },
 
-  { "cl-terpri", Fterpri, 0, 1,
-    "Output a newline character to STREAM.\n"
-    "\n"
-    "STREAM defaults to `*standard-output*'.\n"
-    "Returns nil.\n"
-    "\n(fn &optional STREAM)" },
-
   { "cl-fresh-line", Ffresh_line, 0, 1,
     "Output a newline to STREAM if not at the start of a line.\n"
     "\n"
@@ -394,13 +387,6 @@ static const subr_def_t subrs[] = {
     "Returns t on success, nil if truncation is not supported.\n"
     "\n(fn STREAM LENGTH)" },
 
-  { "cl-file-string-length", Ffile_string_length, 2, 2,
-    "Return the byte count of OBJECT's printed representation.\n"
-    "\n"
-    "Returns the number of bytes that writing OBJECT to STREAM\n"
-    "would add to the file position.\n"
-    "\n(fn STREAM OBJECT)" },
-
   /* ── Lisp reader / printer ────────────────────────────────────────── */
   { "cl-read", Fread, 0, 4,
     "Read one Lisp object from STREAM and return it.\n"
@@ -412,15 +398,6 @@ static const subr_def_t subrs[] = {
     "form, return EOF-VALUE.  Otherwise signal an error on EOF.\n"
     "RECURSIVE-P is accepted for compatibility and currently ignored.\n"
     "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE RECURSIVE-P)" },
-
-  { "cl-read-from-string", Fread_from_string, 1, 7,
-    "Read one Lisp object from STRING and return (VALUE . POSITION).\n"
-    "\n"
-    "Delegates to Emacs' `read-from-string'.\n"
-    "Keywords :START and :END delimit the substring to read.\n"
-    "If :PRESERVE-WHITESPACE is non-nil, trailing whitespace is kept\n"
-    "in the secondary return value (delegated to Emacs reader).\n"
-    "\n(fn STRING &optional EOF-ERROR-P EOF-VALUE &key START END PRESERVE-WHITESPACE)" },
 
   { "cl-read-preserving-whitespace", Fread_preserving_whitespace, 0, 4,
     "Read one Lisp object from STREAM, preserving trailing whitespace.\n"
@@ -436,84 +413,8 @@ static const subr_def_t subrs[] = {
     "The delimiter is consumed; reaching end of file is an error.\n"
     "\n(fn CHAR &optional STREAM RECURSIVE-P)" },
 
-  { "cl-y-or-n-p", Fy_or_n_p, 0, 16,
-    "Ask a yes/no question on *query-io*.\n"
-    "\n"
-    "CONTROL and ARGUMENTS are passed to `format' to produce the\n"
-    "prompt string.  Returns t for \"yes\", nil for \"no\".\n"
-    "\n(fn &optional CONTROL &rest ARGUMENTS)" },
-
-  { "cl-yes-or-no-p", Fyes_or_no_p, 0, 16,
-    "Ask a yes/no question on *query-io*, requiring full answer.\n"
-    "\n"
-    "Like `cl-y-or-n-p' but requires \"yes\" or \"no\" as the\n"
-    "response.  Returns t for \"yes\", nil otherwise.\n"
-    "\n(fn &optional CONTROL &rest ARGUMENTS)" },
-
-  { "cl-write", Fwrite, 1, 15,
-    "Write OBJECT to STREAM.\n"
-    "\n"
-    "Keywords with an Emacs counterpart are bound during output:\n"
-    "  :CIRCLE → print-circle  :LEVEL → print-level\n"
-    "  :LENGTH → print-length  :GENSYM → print-gensym\n"
-    ":ESCAPE nil prints without escaping (princ-style); :PRETTY t uses\n"
-    "Emacs' pretty-printer.  The remaining CL controls (:BASE :RADIX\n"
-    ":CASE :ARRAY :READABLY and the pprint controls) are accepted for\n"
-    "compatibility and ignored.\n"
-    "\n(fn OBJECT &key STREAM ESCAPE RADIX BASE CIRCLE PRETTY LEVEL LENGTH CASE GENSYM ARRAY READABLY RIGHT-MARGIN MISER-WIDTH PPRINT-DISPATCH LINES)" },
-
-  { "cl-prin1", Fprin1, 1, 2,
-    "Output OBJECT to STREAM in a form suitable for `cl-read'.\n"
-    "\n"
-    "Delegates to Emacs' `prin1-to-string'.\n"
-    "STREAM defaults to `*standard-output*'.\n"
-    "Returns OBJECT.\n"
-    "\n(fn OBJECT &optional STREAM)" },
-
-  { "cl-princ", Fprinc, 1, 2,
-    "Output OBJECT to STREAM in a human-readable form.\n"
-    "\n"
-    "For strings, output is written without surrounding quotes;\n"
-    "for other objects the behavior matches `cl-prin1'.\n"
-    "STREAM defaults to `*standard-output*'.\n"
-    "Returns OBJECT.\n"
-    "\n(fn OBJECT &optional STREAM)" },
-
-  { "cl-print", Fprint, 1, 2,
-    "Output a newline, then OBJECT (via PRIN1), then a space, to STREAM.\n"
-    "\n"
-    "STREAM defaults to `*standard-output*'.\n"
-    "Returns OBJECT.\n"
-    "\n(fn OBJECT &optional STREAM)" },
-
-  { "cl-pprint", Fpprint, 1, 2,
-    "Pretty-print OBJECT to STREAM.\n"
-    "\n"
-    "Delegates to Emacs' `pp-to-string' for formatting.\n"
-    "STREAM defaults to `*standard-output*'.\n"
-    "\n(fn OBJECT &optional STREAM)" },
-
-  { "cl-prin1-to-string", Fprin1_to_string, 1, 1,
-    "Return a string containing OBJECT printed in a form suitable\n"
-    "for `cl-read'.\n"
-    "\n"
-    "Delegates to Emacs' `prin1-to-string'.\n"
-    "\n(fn OBJECT)" },
-
-  { "cl-princ-to-string", Fprinc_to_string, 1, 1,
-    "Return a string containing OBJECT printed in a human-readable\n"
-    "form.\n"
-    "\n"
-    "For strings the result lacks surrounding quotes.\n"
-    "\n(fn OBJECT)" },
-
-  { "cl-write-to-string", Fwrite_to_string, 1, 15,
-    "Write OBJECT to a string and return it.\n"
-    "\n"
-    "Like `cl-write' but returns the output as a string instead\n"
-    "of writing to a stream.  Accepts the same keyword arguments\n"
-    "as `cl-write'.\n"
-    "\n(fn OBJECT &key ESCAPE RADIX BASE CIRCLE PRETTY LEVEL LENGTH CASE GENSYM ARRAY READABLY)" },
+  /* The remaining Lisp reader/printer functions are implemented by the
+     `emacs-io-lib' layer in lisp/emacs-io-lib.el (loaded at init). */
 };
 
 /* ── module entry point ───────────────────────────────────────────────── */
@@ -532,6 +433,20 @@ int emacs_module_init(struct emacs_runtime *runtime) {
           subrs[i].doc, NULL);
 
   init_standard_streams(env);
+
+  /* Load the Lisp layer (the functions that are just glue over Emacs'
+     reader/printer).  It lives in lisp/ and must be on load-path; if it
+     cannot be found, warn and carry on with just the C core. */
+  emacs_value lib = eintern(env, "emacs-io-lib");
+  env->funcall(env, eintern(env, "require"), 1, &lib);
+  if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
+    env->non_local_exit_clear(env);
+    efuncall(env, "message", 1, (emacs_value[]){ estring(env,
+      "emacs-io: could not load the Lisp layer (emacs-io-lib); add the "
+      "lisp/ directory to load-path for cl-write, cl-read-from-string, "
+      "cl-prin1, cl-read-delimited-list, and friends.") });
+  }
+
   provide(env, "emacs-io");
   return 0;
 }

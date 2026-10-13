@@ -4,8 +4,8 @@
 thread-safe stream I/O — bypassing buffer gap-machinery entirely.**
 
 ```elisp
+(add-to-list 'load-path "/path/to/emacs-io/lisp")
 (module-load "emacs-io.so")
-(require 'emacs-io-macros)  ;; cl-with-open-file, cl-with-open-stream
 ```
 
 ## Why
@@ -27,19 +27,20 @@ make test             # 223 tests: unit + Common Lisp conformance
 make bench            # 12 performance benchmarks
 ```
 
-Load the module and companion Lisp macros:
-
-```elisp
-(module-load "emacs-io.so")
-(load "emacs-io-macros.el")   ;; provides cl-with-open-file, cl-with-open-stream
-```
-
-Or with `require` after adding to `load-path`:
+The module loads a small Lisp layer (`lisp/emacs-io-lib.el`) during
+initialisation, so `lisp/` must be on `load-path` first.  That layer
+implements the reader/printer glue (`cl-write`, `cl-prin1`, `cl-pprint`,
+`cl-read-from-string`, `cl-terpri`, `cl-y-or-n-p`, ...) and loads the
+companion macros `cl-with-open-file` / `cl-with-open-stream`
+(`lisp/emacs-io-macros.el`).
 
 ```elisp
 (add-to-list 'load-path "/path/to/emacs-io/lisp")
-(require 'emacs-io-macros)
+(module-load "emacs-io.so")   ;; requires emacs-io-lib, then emacs-io-macros
 ```
+
+If `lisp/` is not on `load-path`, the module still loads (with a warning)
+and only the C primitives are available.
 
 `EMACS_IO_BENCH_FULL=1 make bench` enables the 10 MB-scale tests.
 
@@ -128,7 +129,7 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 | Function | Signature | Description |
 |---|---|---|
 | `cl-read` | `(cl-read &optional stream eof-error-p eof-value recursive-p)` | Read one Lisp object from the stream |
-| `cl-read-from-string` | `(cl-read-from-string string &optional eof-error-p eof-value &key start end)` | Read one Lisp object from a string |
+| `cl-read-from-string` | `(cl-read-from-string string &optional eof-error-p eof-value &key start end preserve-whitespace)` | Read one Lisp object from a string |
 | `cl-write` | `(cl-write object &key stream ...)` | Write an object (`:stream` defaults to `*standard-output*`; `:escape nil` prints princ-style) |
 | `cl-prin1` | `(cl-prin1 object &optional stream)` | Write an object in a form readable by `cl-read` |
 | `cl-princ` | `(cl-princ object &optional stream)` | Write an object in human-readable form |
@@ -275,10 +276,10 @@ src/fdstream.c   — POSIX fd I/O with 8 KB userspace ring buffers
 src/mmapstream.c — mmap-backed input for regular files (zero-copy reads)
 src/strstream.c  — string-input (mem_cursor), string-output (block-chain)
 src/bufstream.c  — buffer input (mem_cursor), buffer output (insert), buffer I/O (bidirectional)
-src/reader.c     — cl-read-char, cl-read-line (CRLF-aware), bulk chunk read, read-delimited-list
-src/printer.c    — cl-write-*, terpri, fresh-line, flush/force/finish/clear
+src/reader.c     — cl-read (incremental read-from-string), cl-read-char, cl-read-line
+                   (CRLF-aware), bulk chunk reads, read-delimited-list
+src/printer.c    — cl-write-char/string/line/byte, fresh-line, flush/force/finish/clear
 src/fileio.c     — cl-open, cl-close, predicates, file-position, file-length, ftruncate
-src/lispio.c     — cl-read (→ read-from-string), cl-prin1/princ/print/pprint, cl-write
 src/stdstream.c  — standard stream variable init
 src/compstream.c — synonym, broadcast, concatenated, two-way, echo streams
 src/util.c/h     — emacs_env wrappers, defun trampoline, seq_classify, stream_or_error, eof_result
@@ -286,6 +287,9 @@ src/syms.h       — pre-interned symbol table
 src/strbuf.h     — growable byte buffer
 src/subrs.h      — declarations of every registered subr
 src/emacs-io.c   — emacs_module_init + subr registration table
+lisp/emacs-io-lib.el    — Lisp layer: cl-write/-to-string, cl-prin1/princ/print/
+                          pprint, cl-prin1/princ-to-string, cl-terpri, cl-read-from-string,
+                          cl-y-or-n-p, cl-yes-or-no-p, cl-file-string-length
 lisp/emacs-io-macros.el — cl-with-open-file, cl-with-open-stream macros
 ```
 
@@ -295,6 +299,16 @@ event loops.  `cl-read-chunk` and `cl-read-string` use `stream_direct` for
 zero-copy reads from mmap and string-input streams.
 
 ## Notes
+
+- **C core + Lisp layer**: the `.so` provides the byte/character/sequence
+  primitives, the stream constructors, the predicates, and `cl-read` /
+  `cl-read-delimited-list` (which need direct access to the stream pushback
+  ring).  Functions that are just glue over Emacs' own reader and printer
+  (`cl-write`, `cl-write-to-string`, `cl-prin1`, `cl-princ`, `cl-print`,
+  `cl-pprint`, `cl-prin1-to-string`, `cl-princ-to-string`, `cl-terpri`,
+  `cl-read-from-string`, `cl-y-or-n-p`, `cl-yes-or-no-p`,
+  `cl-file-string-length`) live in `lisp/emacs-io-lib.el`, which the module
+  requires at init — so `lisp/` must be on `load-path`.
 
 - **Windows unsupported**: Linux/BSD/macOS.  Uses `memfd_create`, `O_NONBLOCK`, `fsync`, `mmap`, `pthread`, `ftruncate`.
 

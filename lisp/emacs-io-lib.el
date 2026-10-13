@@ -1,0 +1,179 @@
+;;; emacs-io-lib.el --- Lisp layer over the emacs-io core module -*- lexical-binding: t; -*-
+
+;;; Commentary:
+;; The emacs-io core module (emacs-io.so) provides the byte/character I/O
+;; primitives, the stream constructors, the predicates, and `cl-read' (which
+;; needs direct access to the stream pushback ring).  This layer implements
+;; the remaining functions that are just glue over Emacs' own reader and
+;; printer (or over those primitives), where Lisp is simpler and safer than C.
+;;
+;; It is loaded automatically when the core module is initialised; put this
+;; directory on `load-path' before loading the module.
+
+;;; Code:
+
+(require 'cl-lib)
+
+;; C primitives provided by emacs-io.so (declared so this file byte-compiles
+;; cleanly when the module has not been loaded).
+(declare-function cl-write-string "emacs-io"
+                  (string &optional stream &key start end))
+(declare-function cl-write-char "emacs-io" (character &optional stream))
+(declare-function cl-read-line "emacs-io"
+                  (&optional stream eof-error-p eof-value recursive-p))
+(declare-function cl-make-string-output-stream "emacs-io"
+                  (&rest keys))
+(declare-function cl-get-output-stream-string "emacs-io" (stream))
+
+;;;; Reader
+
+(cl-defun cl-read-from-string (string &optional (eof-error-p t) eof-value
+                                      &key start end preserve-whitespace
+                                      &allow-other-keys)
+  "Read one Lisp object from STRING and return (VALUE . POSITION).
+Keywords :START and :END delimit the substring to read.
+If :PRESERVE-WHITESPACE is non-nil, the delimiting whitespace is not
+counted in POSITION."
+  (let* ((len (length string))
+         (start (max 0 (or start 0)))
+         (end (let ((e (or end len)))
+                (if (or (< e 0) (> e len)) len e)))
+         (result (condition-case nil
+                     (read-from-string string start end)
+                   (end-of-file :eof))))
+    (if (eq result :eof)
+        (if eof-error-p
+            (signal 'end-of-file '("End of file on string"))
+          eof-value)
+      (let ((pos (cdr result)))
+        ;; Unless :preserve-whitespace, consume the single whitespace
+        ;; character that delimits the object (as CL's reader does), so
+        ;; POSITION matches CLHS: (read-from-string " 1 3 5" t nil :start 2)
+        ;; => 3, 5.
+        (when (and (not preserve-whitespace)
+                   (< pos end)
+                   (memq (aref string pos) '(?\s ?\t ?\n ?\r ?\f)))
+          (setq pos (1+ pos)))
+        (cons (car result) pos)))))
+
+(defun cl--query-io ()
+  (let ((s (and (boundp '*query-io*) (symbol-value '*query-io*))))
+    (or s (error "*query-io* is not an open stream"))))
+
+(defun cl--ask-query (control args suffix yes-p)
+  (let ((s (cl--query-io)))
+    (when control
+      (cl-write-string (apply #'format control args) s)
+      (cl-write-string suffix s))
+    (let* ((line (car (cl-read-line s nil "")))
+           (resp (if (stringp line) line "")))
+      (funcall yes-p resp))))
+
+(defun cl-y-or-n-p (&optional control &rest arguments)
+  "Ask a yes/no question on *query-io*.  Return t for \"yes\", nil for \"no\"."
+  (cl--ask-query control arguments " (y/n) "
+                 (lambda (r) (and (> (length r) 0)
+                                  (memq (aref r 0) '(?y ?Y))
+                                  t))))
+
+(defun cl-yes-or-no-p (&optional control &rest arguments)
+  "Ask a yes/no question requiring a full \"yes\" answer on *query-io*."
+  (cl--ask-query control arguments " (yes/no) "
+                 (lambda (r) (and (>= (length r) 3)
+                                  (memq (aref r 0) '(?y ?Y))
+                                  (memq (aref r 1) '(?e ?E))
+                                  (memq (aref r 2) '(?s ?S))
+                                  t))))
+
+;;;; Printer
+
+(defun cl-prin1-to-string (object)
+  "Return a string containing OBJECT printed in a form suitable for `cl-read'."
+  (prin1-to-string object))
+
+(defun cl--princ-string (object)
+  ;; princ writes strings without their surrounding quotes.
+  (if (stringp object) object (prin1-to-string object)))
+
+(defun cl-princ-to-string (object)
+  "Return a string containing OBJECT printed in a human-readable form."
+  (cl--princ-string object))
+
+(defun cl-prin1 (object &optional stream)
+  "Output OBJECT to STREAM in a form suitable for `cl-read'.  Return OBJECT."
+  (cl-write-string (prin1-to-string object) stream)
+  object)
+
+(defun cl-princ (object &optional stream)
+  "Output OBJECT to STREAM in a human-readable form.  Return OBJECT."
+  (cl-write-string (cl--princ-string object) stream)
+  object)
+
+(defun cl-print (object &optional stream)
+  "Output a newline, then OBJECT (via PRIN1), then a space, to STREAM.
+Return OBJECT."
+  (cl-write-char ?\n stream)
+  (cl-prin1 object stream)
+  (cl-write-char ?\s stream)
+  object)
+
+(defun cl-pprint (object &optional stream)
+  "Pretty-print OBJECT to STREAM (returns nil, as CL specifies no values)."
+  (cl-write-string (pp-to-string object) stream)
+  nil)
+
+(defun cl-terpri (&optional stream)
+  "Output a newline character to STREAM.  Return nil."
+  (cl-write-char ?\n stream)
+  nil)
+
+(cl-defun cl-write (object &key (stream nil stream-p)
+                           (escape nil escape-p)
+                           (pretty nil pretty-p)
+                           (circle nil circle-p)
+                           (level nil level-p)
+                           (length nil length-p)
+                           (gensym nil gensym-p)
+                           base radix case array readably
+                           right-margin miser-width pprint-dispatch lines
+                           &allow-other-keys)
+  "Write OBJECT to STREAM (default `*standard-output*').
+Keywords with an Emacs counterpart are bound during output: :CIRCLE
+(print-circle), :LEVEL, :LENGTH and :GENSYM.  :ESCAPE nil prints without
+escaping; :PRETTY t uses Emacs' pretty-printer.  The remaining CL controls
+are accepted and ignored."
+  (ignore base radix case array readably right-margin miser-width
+          pprint-dispatch lines)
+  (let ((s (if stream-p stream (symbol-value '*standard-output*)))
+        (print-circle (if circle-p circle print-circle))
+        (print-level  (if level-p  level  print-level))
+        (print-length (if length-p length print-length))
+        (print-gensym (if gensym-p gensym print-gensym)))
+    (cl-write-string
+     (cond ((and escape-p (null escape)) (format "%s" object))
+           ((and pretty-p pretty) (pp-to-string object))
+           (t (prin1-to-string object)))
+     s))
+  object)
+
+(defun cl-write-to-string (object &rest keys)
+  "Write OBJECT to a string and return it.  Accepts `cl-write' keywords."
+  (let ((s (cl-make-string-output-stream)))
+    (apply #'cl-write object :stream s keys)
+    (cl-get-output-stream-string s)))
+
+;;;; Introspection
+
+(defun cl-file-string-length (stream object)
+  "Return the byte count of OBJECT's printed representation on STREAM."
+  (ignore stream)
+  (string-bytes (prin1-to-string object)))
+
+;;;; Convenience macros
+
+;; `cl-with-open-file' / `cl-with-open-stream' live in their own file; load
+;; them together with the core layer.
+(require 'emacs-io-macros)
+
+(provide 'emacs-io-lib)
+;;; emacs-io-lib.el ends here

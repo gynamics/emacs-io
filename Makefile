@@ -10,7 +10,7 @@ TARGET   = emacs-io.so
 OBJS     = $(SRC)/emacs-io.o $(SRC)/util.o $(SRC)/stream.o $(SRC)/fdstream.o \
            $(SRC)/strstream.o $(SRC)/mmapstream.o $(SRC)/bufstream.o \
            $(SRC)/stdstream.o $(SRC)/reader.o $(SRC)/printer.o \
-           $(SRC)/fileio.o $(SRC)/lispio.o $(SRC)/compstream.o
+           $(SRC)/fileio.o $(SRC)/compstream.o
 TEST     = $(TST)/emacs-io-test.el
 CONF     = $(TST)/emacs-io-conformance-test.el
 BENCH    = bench/emacs-io-perf-test.el
@@ -29,7 +29,7 @@ $(SRC)/%.o: $(SRC)/%.c $(HDRS) Makefile
 
 clean:
 	rm -f $(TARGET) $(OBJS) $(TEST:.el=.elc) $(CONF:.el=.elc) $(BENCH:.el=.elc) \
-	      lisp/emacs-io-macros.elc
+	      lisp/emacs-io-macros.elc lisp/emacs-io-lib.elc
 
 check: $(TARGET)
 	@echo "Module:   $(TARGET)"
@@ -41,15 +41,15 @@ check: $(TARGET)
 	@echo "  make bench    — performance / scale tests"
 
 verify: $(TARGET)
-	@$(EMACS) --batch -Q --eval '(module-load "$(CURDIR)/$(TARGET)")' \
+	@$(EMACS) --batch -Q -L lisp --eval '(module-load "$(CURDIR)/$(TARGET)")' \
 		--eval '(message "emacs-io %d functions loaded" (length (apropos-internal "^cl-" (function fboundp))))'
 
 test: $(TARGET)
-	@rm -f $(TEST:.el=.elc) $(CONF:.el=.elc) lisp/emacs-io-macros.elc
+	@rm -f $(TEST:.el=.elc) $(CONF:.el=.elc) lisp/emacs-io-macros.elc lisp/emacs-io-lib.elc
 	@echo "=== unit tests ==="
 	@$(EMACS) --batch -Q -L $(SRC) -L lisp -L $(TST) -l $(TEST) -l $(CONF) -f ert-run-tests-batch-and-exit
 
 bench: $(TARGET)
 	@rm -f $(BENCH:.el=.elc)
 	@echo "=== benchmarks ==="
-	@$(EMACS) --batch -Q -L $(SRC) -L bench -l $(BENCH) -f ert-run-tests-batch-and-exit
+	@$(EMACS) --batch -Q -L $(SRC) -L lisp -L bench -l $(BENCH) -f ert-run-tests-batch-and-exit

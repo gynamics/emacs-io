@@ -140,19 +140,6 @@ emacs_value Fwrite_byte(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   return args[0];
 }
 
-/* ── cl-terpri ────────────────────────────────────────────────────────── */
-
-emacs_value Fterpri(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
-                     void *data) {
-  (void)data;
-  /* (cl-terpri &optional stream) */
-  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sout);
-  check_open(env, s, "cl-terpri");
-  unsigned char nl = '\n';
-  stream_write(s, &nl, 1);
-  return syms.v_nil;
-}
-
 /* ── cl-fresh-line ────────────────────────────────────────────────────── */
 
 emacs_value Ffresh_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,

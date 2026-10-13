@@ -410,11 +410,149 @@ emacs_value Fread_chunk(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   return efuncall_cached(env, syms.fn_cons, 2, pair_args);
 }
 
-/* cl-read-preserving-whitespace lives in lispio.c alongside cl-read. */
+/* ── cl-read / cl-read-preserving-whitespace ──────────────────────────────
+   These stay in C (rather than moving to the Lisp layer) because reading a
+   form needs stream_read, which drains the pushback ring; the Lisp-visible
+   bulk primitives such as cl-read-chunk bypass it via the zero-copy path. */
+
+/* Try to read one form from the accumulated buffer SB.  On success stores
+   the value in *result and its consumed byte count in *consumed and returns
+   true.  Returns false when SB only holds an incomplete form, leaving a
+   genuine (non-EOF) reader error pending for the caller to notice. */
+static bool try_read_from_buffer(emacs_env *env, strbuf_t *sb,
+                                  emacs_value *result, ptrdiff_t *consumed) {
+  emacs_value estr = env->make_string(env, sb->data, (ptrdiff_t)sb->len);
+  emacs_value read_args[2];
+  read_args[0] = estr;
+  read_args[1] = eint(env, 0);
+
+  emacs_value raw = env->funcall(env, syms.fn_read_from_string,
+                                  2, read_args);
+
+  enum emacs_funcall_exit exit = env->non_local_exit_check(env);
+  if (exit == emacs_funcall_exit_return) {
+    emacs_value pair = raw;
+    *result = efuncall_cached(env, syms.fn_car, 1, &pair);
+    emacs_value pos  = efuncall_cached(env, syms.fn_cdr, 1, &pair);
+    *consumed = eint_extract(env, pos);
+    return true;
+  }
+
+  emacs_value sym = syms.v_nil;
+  emacs_value data = syms.v_nil;
+  env->non_local_exit_get(env, &sym, &data);
+  bool is_eof = env->eq(env, sym, syms.v_end_of_file);
+  env->non_local_exit_clear(env);
+
+  if (is_eof)
+    return false;
+
+  env->non_local_exit_signal(env, sym, data);
+  *consumed = 0;
+  return false;
+}
+
+/* Drop trailing whitespace from SB (used when a form is unfinished at
+   EOF, e.g. "(1 2 " should still parse as the list (1 2)). */
+static void trim_trailing_whitespace(strbuf_t *sb) {
+  while (sb->len > 0) {
+    char c = sb->data[sb->len - 1];
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f')
+      sb->data[--sb->len] = '\0';
+    else
+      break;
+  }
+}
+
+/* Read chunks from S into SB until one complete form can be parsed.
+   Returns true and stores the value and its byte length in *result and
+   *consumed.  Returns false when EOF is reached first; a pending non-local
+   exit (a genuine reader error) is left for the caller to notice. */
+static bool read_object_from_stream(emacs_env *env, cl_stream_t *s,
+                                    strbuf_t *sb, emacs_value *result,
+                                    ptrdiff_t *consumed) {
+  unsigned char chunk[4096];
+  for (;;) {
+    if (sb->len > 0) {
+      if (try_read_from_buffer(env, sb, result, consumed))
+        return true;
+      if (env->non_local_exit_check(env) != emacs_funcall_exit_return)
+        return false;
+    }
+
+    ptrdiff_t r = stream_read(s, chunk, sizeof(chunk));
+    if (r <= 0) {
+      /* At EOF, strip trailing whitespace and try once more. */
+      trim_trailing_whitespace(sb);
+      if (sb->len > 0 && try_read_from_buffer(env, sb, result, consumed))
+        return true;
+      return false;
+    }
+
+    strbuf_append(sb, (const char *)chunk, r);
+  }
+}
+
+static bool read_ws_byte(char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+}
+
+/* Shared by cl-read and cl-read-preserving-whitespace.  With PRESERVE_WS
+   false, the single whitespace character that delimits the object is
+   discarded, as CL's reader does; with true it is pushed back. */
+static emacs_value read_form(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                             bool preserve_ws) {
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
+  if (!s || !stream_is_open(s)) {
+    signal_error(env, "cl-read: stream is closed");
+    return syms.v_nil;
+  }
+
+  strbuf_t *sb = strbuf_create(256);
+  if (!sb) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
+
+  emacs_value result = syms.v_nil;
+  ptrdiff_t consumed = 0;
+  bool parsed = read_object_from_stream(env, s, sb, &result, &consumed);
+
+  if (!parsed) {
+    bool reader_error =
+      env->non_local_exit_check(env) != emacs_funcall_exit_return;
+    strbuf_free(sb);
+    if (reader_error) return syms.v_nil;   /* propagate the pending error */
+    return eof_result(env, s, nargs, args, 1, 2);
+  }
+
+  /* Push back the unconsumed bytes; when not preserving whitespace, drop
+     the one delimiting whitespace character first. */
+  ptrdiff_t first = consumed;
+  if (!preserve_ws && first < (ptrdiff_t)sb->len &&
+      read_ws_byte(sb->data[first]))
+    first++;
+  for (ptrdiff_t i = first; i < (ptrdiff_t)sb->len; i++)
+    stream_unread(s, (unsigned char)sb->data[i]);
+
+  strbuf_free(sb);
+  return result;
+}
+
+emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                  void *data) {
+  (void)data;
+  return read_form(env, nargs, args, false);
+}
+
+emacs_value Fread_preserving_whitespace(emacs_env *env, ptrdiff_t nargs,
+                                         emacs_value *args, void *data) {
+  (void)data;
+  return read_form(env, nargs, args, true);
+}
 
 /* ── cl-read-delimited-list ───────────────────────────────────────────
    (cl-read-delimited-list char &optional stream recursive-p)
-   Read objects from STREAM until CHAR is seen, return them as a list. */
+   Read objects from STREAM until CHAR is seen, return them as a list.
+   Kept in C alongside cl-read: it reads characters one at a time, so it
+   must not go through cl-read's pushback-sensitive chunk reader. */
 
 /* Try to parse one complete form from the front of SB.  On success stores
    the value in *val and the number of consumed bytes in *pos and returns
@@ -496,88 +634,4 @@ emacs_value Fread_delimited_list(emacs_env *env, ptrdiff_t nargs,
 
   strbuf_free(sb);
   return efuncall(env, "reverse", 1, &lst);
-}
-
-/* ── yes/no queries on *query-io* ────────────────────────────────────
-   Shared by cl-y-or-n-p and cl-yes-or-no-p, which differ only in the
-   prompt suffix and in how much of the answer must match. */
-
-/* Match a leading "y" (full == false) or "yes" (full == true). */
-static bool answer_is_yes(const char *s, ptrdiff_t len, bool full) {
-  if (len < 1 || (s[0] != 'y' && s[0] != 'Y')) return false;
-  if (!full) return true;
-  return len >= 3
-      && (s[1] == 'e' || s[1] == 'E')
-      && (s[2] == 's' || s[2] == 'S');
-}
-
-/* Write the formatted prompt (if any) followed by SUFFIX to S, read one
-   line from S, and return whether the answer matched.  Signals and
-   returns false if *query-io* is not an open stream. */
-static bool ask_query(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
-                      cl_stream_t *s, const char *suffix, bool full) {
-  if (nargs >= 1 && env->is_not_nil(env, args[0])) {
-    emacs_value fmt_args[16];
-    fmt_args[0] = args[0];
-    ptrdiff_t nfmt = nargs < 16 ? nargs : 16;
-    for (ptrdiff_t i = 1; i < nfmt; i++)
-      fmt_args[i] = args[i];
-
-    emacs_value prompt = env->funcall(env, eintern(env, "format"), nfmt, fmt_args);
-    stream_write_string(env, s, prompt);
-    stream_write_string(env, s, estring(env, suffix));
-  }
-
-  strbuf_t *sb = strbuf_create(128);
-  if (!sb) return false;
-  for (;;) {
-    unsigned char ch;
-    ptrdiff_t r = stream_read(s, &ch, 1);
-    if (r <= 0) break;
-    if (ch == '\n' || ch == '\r') break;
-    strbuf_append(sb, (const char *)&ch, 1);
-  }
-
-  emacs_value resp = strbuf_to_estring(env, sb);
-  strbuf_free(sb);
-
-  ptrdiff_t rlen = 0;
-  char *rstr = estring_alloc(env, resp, &rlen);
-  if (!rstr) return false;
-  bool result = answer_is_yes(rstr, rlen, full);
-  free(rstr);
-  return result;
-}
-
-/* Resolve *query-io*, then run ask_query against it. */
-static emacs_value query_io(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
-                            const char *fnname, const char *suffix, bool full) {
-  emacs_value qio = efuncall_cached(env, syms.fn_symbol_value, 1,
-                     (emacs_value[]){ eintern(env, "*query-io*") });
-  cl_stream_t *s = euser_ptr_stream_get(env, qio);
-  if (!s || !stream_is_open(s)) {
-    char buf[128];
-    snprintf(buf, sizeof(buf), "%s: *query-io* is not an open stream", fnname);
-    signal_error(env, buf);
-    return syms.v_nil;
-  }
-  return ask_query(env, nargs, args, s, suffix, full) ? syms.v_t : syms.v_nil;
-}
-
-/* ── cl-y-or-n-p ─────────────────────────────────────────────────────
-   (cl-y-or-n-p &optional control &rest arguments) */
-
-emacs_value Fy_or_n_p(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
-                       void *data) {
-  (void)data;
-  return query_io(env, nargs, args, "y-or-n-p", " (y/n) ", false);
-}
-
-/* ── cl-yes-or-no-p ──────────────────────────────────────────────────
-   (cl-yes-or-no-p &optional control &rest arguments) */
-
-emacs_value Fyes_or_no_p(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
-                          void *data) {
-  (void)data;
-  return query_io(env, nargs, args, "yes-or-no-p", " (yes/no) ", true);
 }

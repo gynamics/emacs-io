@@ -432,26 +432,6 @@ emacs_value Fstream_external_format(emacs_env *env, ptrdiff_t nargs,
   return s->external_format ? s->external_format : eintern(env, ":default");
 }
 
-emacs_value Ffile_string_length(emacs_env *env, ptrdiff_t nargs,
-                                 emacs_value *args, void *data) {
-  (void)data;
-  if (nargs < 2) {
-    signal_error(env, "cl-file-string-length requires 2 arguments");
-    return syms.v_nil;
-  }
-  /* return nil if stream cannot determine encoding */
-  cl_stream_t *s = euser_ptr_stream_get(env, args[0]);
-  if (!s) { signal_error(env, "Invalid stream"); return syms.v_nil; }
-  (void)s;
-
-  /* for character streams, length is printed repr byte count */
-  emacs_value printed = efuncall_cached(env, syms.fn_prin1_to_string, 1, &args[1]);
-  ptrdiff_t slen = 0;
-  if (!env->copy_string_contents(env, printed, NULL, &slen))
-    return syms.v_nil;
-  return eint(env, slen > 0 ? slen - 1 : 0);
-}
-
 emacs_value Fftruncate(emacs_env *env, ptrdiff_t nargs,
                         emacs_value *args, void *data) {
   (void)data;

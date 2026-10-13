@@ -26,15 +26,14 @@ CL_SUBR(Fread_sequence);
 CL_SUBR(Fread_string);
 CL_SUBR(Fread_chunk);
 CL_SUBR(Fread_delimited_list);
-CL_SUBR(Fy_or_n_p);
-CL_SUBR(Fyes_or_no_p);
+CL_SUBR(Fread);
+CL_SUBR(Fread_preserving_whitespace);
 
 /* printer.c */
 CL_SUBR(Fwrite_char);
 CL_SUBR(Fwrite_string);
 CL_SUBR(Fwrite_line);
 CL_SUBR(Fwrite_byte);
-CL_SUBR(Fterpri);
 CL_SUBR(Ffresh_line);
 CL_SUBR(Ffinish_output);
 CL_SUBR(Fforce_output);
@@ -56,21 +55,7 @@ CL_SUBR(Ffile_position);
 CL_SUBR(Ffile_length);
 CL_SUBR(Finteractive_stream_p);
 CL_SUBR(Fstream_external_format);
-CL_SUBR(Ffile_string_length);
 CL_SUBR(Fftruncate);
-
-/* lispio.c */
-CL_SUBR(Fread);
-CL_SUBR(Fread_preserving_whitespace);
-CL_SUBR(Fread_from_string);
-CL_SUBR(Fwrite);
-CL_SUBR(Fprin1);
-CL_SUBR(Fprinc);
-CL_SUBR(Fprint);
-CL_SUBR(Fpprint);
-CL_SUBR(Fprin1_to_string);
-CL_SUBR(Fprinc_to_string);
-CL_SUBR(Fwrite_to_string);
 
 /* compstream.c */
 CL_SUBR(Fmake_synonym_stream);
