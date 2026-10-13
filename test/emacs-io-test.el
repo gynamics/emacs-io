@@ -2,10 +2,10 @@
 
 (require 'ert)
 
-;; Load the module
-(module-load (expand-file-name "../emacs-io.so" (file-name-directory load-file-name)))
-;; Load the macros
-(load (expand-file-name "../lisp/emacs-io-macros.el" (file-name-directory load-file-name)))
+;; Load the package: add the repository root so `require' finds emacs-io.el
+;; (and, next to it, the emacs-io-core.so loaded by that entry point).
+(add-to-list 'load-path (expand-file-name ".." (file-name-directory load-file-name)))
+(require 'emacs-io)
 
 ;; ── Helpers ──────────────────────────────────────────────────────────────
 

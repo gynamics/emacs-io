@@ -414,7 +414,7 @@ static const subr_def_t subrs[] = {
     "\n(fn CHAR &optional STREAM RECURSIVE-P)" },
 
   /* The remaining Lisp reader/printer functions are implemented by the
-     `emacs-io-lib' layer in lisp/emacs-io-lib.el (loaded at init). */
+     `emacs-io' package (emacs-io.el), which requires this core module. */
 };
 
 /* ── module entry point ───────────────────────────────────────────────── */
@@ -433,20 +433,6 @@ int emacs_module_init(struct emacs_runtime *runtime) {
           subrs[i].doc, NULL);
 
   init_standard_streams(env);
-
-  /* Load the Lisp layer (the functions that are just glue over Emacs'
-     reader/printer).  It lives in lisp/ and must be on load-path; if it
-     cannot be found, warn and carry on with just the C core. */
-  emacs_value lib = eintern(env, "emacs-io-lib");
-  env->funcall(env, eintern(env, "require"), 1, &lib);
-  if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
-    env->non_local_exit_clear(env);
-    efuncall(env, "message", 1, (emacs_value[]){ estring(env,
-      "emacs-io: could not load the Lisp layer (emacs-io-lib); add the "
-      "lisp/ directory to load-path for cl-write, cl-read-from-string, "
-      "cl-prin1, cl-read-delimited-list, and friends.") });
-  }
-
-  provide(env, "emacs-io");
+  provide(env, "emacs-io-core");
   return 0;
 }

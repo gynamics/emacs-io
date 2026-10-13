@@ -1,29 +1,41 @@
-;;; emacs-io-lib.el --- Lisp layer over the emacs-io core module -*- lexical-binding: t; -*-
+;;; emacs-io.el --- CL-style stream I/O for GNU Emacs  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026  Free Software Foundation, Inc.
+
+;; Author: emacs-io contributors
+;; Version: 1.0
+;; Package-Requires: ((emacs "31"))
+;; Keywords: files, extensions
+
+;; This file is not part of GNU Emacs.
 
 ;;; Commentary:
-;; The emacs-io core module (emacs-io.so) provides the byte/character I/O
-;; primitives, the stream constructors, the predicates, and `cl-read' (which
-;; needs direct access to the stream pushback ring).  This layer implements
-;; the remaining functions that are just glue over Emacs' own reader and
-;; printer (or over those primitives), where Lisp is simpler and safer than C.
+
+;; Entry point for the emacs-io package.  It loads the native core module
+;; (`emacs-io-core', built as emacs-io-core.so), which provides the
+;; byte/character/sequence primitives, the stream constructors, the
+;; predicates, and `cl-read' (which needs direct access to the stream
+;; pushback ring).  The functions that are just glue over Emacs' own reader
+;; and printer are defined here in Lisp, together with the
+;; `cl-with-open-file' / `cl-with-open-stream' macros.
 ;;
-;; It is loaded automatically when the core module is initialised; put this
-;; directory on `load-path' before loading the module.
+;; Put this directory on `load-path' and `(require 'emacs-io)'.
 
 ;;; Code:
 
 (require 'cl-lib)
+(require 'emacs-io-core)
 
-;; C primitives provided by emacs-io.so (declared so this file byte-compiles
-;; cleanly when the module has not been loaded).
-(declare-function cl-write-string "emacs-io"
+;; C primitives provided by emacs-io-core.so (declared so this file
+;; byte-compiles cleanly when the module has not been loaded).
+(declare-function cl-write-string "emacs-io-core"
                   (string &optional stream &key start end))
-(declare-function cl-write-char "emacs-io" (character &optional stream))
-(declare-function cl-read-line "emacs-io"
+(declare-function cl-write-char "emacs-io-core" (character &optional stream))
+(declare-function cl-read-line "emacs-io-core"
                   (&optional stream eof-error-p eof-value recursive-p))
-(declare-function cl-make-string-output-stream "emacs-io"
+(declare-function cl-make-string-output-stream "emacs-io-core"
                   (&rest keys))
-(declare-function cl-get-output-stream-string "emacs-io" (stream))
+(declare-function cl-get-output-stream-string "emacs-io-core" (stream))
 
 ;;;; Reader
 
@@ -171,9 +183,25 @@ are accepted and ignored."
 
 ;;;; Convenience macros
 
-;; `cl-with-open-file' / `cl-with-open-stream' live in their own file; load
-;; them together with the core layer.
-(require 'emacs-io-macros)
+;;;###autoload
+(cl-defmacro cl-with-open-file ((stream filespec &rest options) &body body)
+  "Like CL's with-open-file: open FILESPEC, bind STREAM, evaluate BODY, close.
+OPTIONS are passed to `cl-open'."
+  (declare (indent 1) (debug ((symbolp form &rest form) body)))
+  `(let ((,stream (cl-open ,filespec ,@options)))
+     (unwind-protect
+         (progn ,@body)
+       (when ,stream
+         (cl-close ,stream)))))
 
-(provide 'emacs-io-lib)
-;;; emacs-io-lib.el ends here
+;;;###autoload
+(cl-defmacro cl-with-open-stream ((var stream) &body body)
+  "Like CL's with-open-stream: bind VAR to STREAM, evaluate BODY, close."
+  (declare (indent 1) (debug ((symbolp form) body)))
+  `(let ((,var ,stream))
+     (unwind-protect
+         (progn ,@body)
+       (cl-close ,var))))
+
+(provide 'emacs-io)
+;;; emacs-io.el ends here

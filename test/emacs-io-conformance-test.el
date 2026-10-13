@@ -8,7 +8,8 @@
 
 (require 'ert)
 
-(module-load (expand-file-name "../emacs-io.so" (file-name-directory load-file-name)))
+(add-to-list 'load-path (expand-file-name ".." (file-name-directory load-file-name)))
+(require 'emacs-io)
 
 ;; emacs-io sets these with `set', so under lexical-binding they are not known
 ;; to be special.  Declare them so `let'-binding them is visible to

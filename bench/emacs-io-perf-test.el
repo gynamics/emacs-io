@@ -6,7 +6,8 @@
 
 (require 'ert)
 
-(module-load (expand-file-name "../emacs-io.so" (file-name-directory load-file-name)))
+(add-to-list 'load-path (expand-file-name ".." (file-name-directory load-file-name)))
+(require 'emacs-io)
 
 ;; ── helpers ──────────────────────────────────────────────────────────────
 

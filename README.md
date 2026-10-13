@@ -4,8 +4,8 @@
 thread-safe stream I/O — bypassing buffer gap-machinery entirely.**
 
 ```elisp
-(add-to-list 'load-path "/path/to/emacs-io/lisp")
-(module-load "emacs-io.so")
+(add-to-list 'load-path "/path/to/emacs-io")
+(require 'emacs-io)
 ```
 
 ## Why
@@ -21,26 +21,27 @@ ring buffers, zero copy within string streams, and no hook machinery.
 ## Quick start
 
 ```bash
-make                  # → emacs-io.so
-make verify           # confirm module loads in Emacs
+make                  # → emacs-io-core.so
 make test             # 223 tests: unit + Common Lisp conformance
 make bench            # 12 performance benchmarks
 ```
 
-The module loads a small Lisp layer (`lisp/emacs-io-lib.el`) during
-initialisation, so `lisp/` must be on `load-path` first.  That layer
-implements the reader/printer glue (`cl-write`, `cl-prin1`, `cl-pprint`,
-`cl-read-from-string`, `cl-terpri`, `cl-y-or-n-p`, ...) and loads the
-companion macros `cl-with-open-file` / `cl-with-open-stream`
-(`lisp/emacs-io-macros.el`).
+`emacs-io.el` is the entry point: it `require`s the native core module
+(`emacs-io-core.so`) — which provides the byte/character/sequence primitives,
+the stream constructors, the predicates and `cl-read` — and then defines the
+reader/printer glue (`cl-write`, `cl-prin1`, `cl-pprint`, `cl-read-from-string`,
+`cl-terpri`, `cl-y-or-n-p`, ...) plus the `cl-with-open-file` /
+`cl-with-open-stream` macros.
 
 ```elisp
-(add-to-list 'load-path "/path/to/emacs-io/lisp")
-(module-load "emacs-io.so")   ;; requires emacs-io-lib, then emacs-io-macros
+(add-to-list 'load-path "/path/to/emacs-io")
+(require 'emacs-io)            ;; loads emacs-io-core.so and the Lisp layer
 ```
 
-If `lisp/` is not on `load-path`, the module still loads (with a warning)
-and only the C primitives are available.
+The native module deliberately has a different base name from the entry
+(`emacs-io-core.so` vs `emacs-io.el`): `load-suffixes` tries `.so` before
+`.el`, so sharing a base name would make `(require 'emacs-io)` load the module
+instead of the entry point.
 
 `EMACS_IO_BENCH_FULL=1 make bench` enables the 10 MB-scale tests.
 
@@ -286,11 +287,12 @@ src/util.c/h     — emacs_env wrappers, defun trampoline, seq_classify, stream_
 src/syms.h       — pre-interned symbol table
 src/strbuf.h     — growable byte buffer
 src/subrs.h      — declarations of every registered subr
-src/emacs-io.c   — emacs_module_init + subr registration table
-lisp/emacs-io-lib.el    — Lisp layer: cl-write/-to-string, cl-prin1/princ/print/
-                          pprint, cl-prin1/princ-to-string, cl-terpri, cl-read-from-string,
-                          cl-y-or-n-p, cl-yes-or-no-p, cl-file-string-length
-lisp/emacs-io-macros.el — cl-with-open-file, cl-with-open-stream macros
+src/emacs-io.c   — emacs_module_init + subr registration table, provide("emacs-io-core")
+emacs-io.el      — entry point: requires emacs-io-core, then defines the Lisp
+                   layer (cl-write/-to-string, cl-prin1/princ/print/pprint,
+                   cl-prin1/princ-to-string, cl-terpri, cl-read-from-string,
+                   cl-y-or-n-p, cl-yes-or-no-p, cl-file-string-length) and the
+                   cl-with-open-file / cl-with-open-stream macros
 ```
 
 Every I/O operation acquires a per-stream `pthread_mutex_t`.  Streams are
@@ -300,15 +302,16 @@ zero-copy reads from mmap and string-input streams.
 
 ## Notes
 
-- **C core + Lisp layer**: the `.so` provides the byte/character/sequence
-  primitives, the stream constructors, the predicates, and `cl-read` /
-  `cl-read-delimited-list` (which need direct access to the stream pushback
-  ring).  Functions that are just glue over Emacs' own reader and printer
-  (`cl-write`, `cl-write-to-string`, `cl-prin1`, `cl-princ`, `cl-print`,
-  `cl-pprint`, `cl-prin1-to-string`, `cl-princ-to-string`, `cl-terpri`,
-  `cl-read-from-string`, `cl-y-or-n-p`, `cl-yes-or-no-p`,
-  `cl-file-string-length`) live in `lisp/emacs-io-lib.el`, which the module
-  requires at init — so `lisp/` must be on `load-path`.
+- **C core + Lisp entry point**: `emacs-io-core.so` provides the
+  byte/character/sequence primitives, the stream constructors, the
+  predicates, and `cl-read` / `cl-read-delimited-list` (which need direct
+  access to the stream pushback ring).  Functions that are just glue over
+  Emacs' own reader and printer (`cl-write`, `cl-write-to-string`,
+  `cl-prin1`, `cl-princ`, `cl-print`, `cl-pprint`, `cl-prin1-to-string`,
+  `cl-princ-to-string`, `cl-terpri`, `cl-read-from-string`, `cl-y-or-n-p`,
+  `cl-yes-or-no-p`, `cl-file-string-length`) live in `emacs-io.el`, which
+  requires the core module — so the install directory must be on `load-path`
+  and `emacs-io.el` must sit next to `emacs-io-core.so`.
 
 - **Windows unsupported**: Linux/BSD/macOS.  Uses `memfd_create`, `O_NONBLOCK`, `fsync`, `mmap`, `pthread`, `ftruncate`.
 
@@ -320,7 +323,7 @@ zero-copy reads from mmap and string-input streams.
 
 - **Common Lisp conformance**: behaviour follows the ANSI spec; `make test` runs the unit tests plus `test/emacs-io-conformance-test.el`, which exercises the CL boundary cases (`cl-open` `:if-exists` defaults to `:error`; `cl-close` of a constructed stream leaves its constituents open; `cl-get-output-stream-string` clears; `cl-write-char` writes UTF-8; `cl-file-position` accepts `:start`/`:end`; and so on).
 
-- **ERT byte-compiler quirk** (Emacs 31.0.90): `cl-fresh-line` and `cl-prin1` misbehave when called — even indirectly — from inside an `ert-deftest` body.  The functions work correctly in normal code; the conformance tests probe them at load time, outside any test lambda.
+- **ERT byte-compiler quirk** (Emacs 31.0.90): `cl-fresh-line` and `cl-prin1` misbehave when called — even indirectly — from inside an `ert-deftest` body (for `cl-prin1`, because Emacs' own `cl-print` library also defines an autoloaded `cl-prin1` that wins in byte-compiled code).  The functions work correctly in normal code; the conformance tests probe them at load time, outside any test lambda.
 
 ## License
 
