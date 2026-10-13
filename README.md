@@ -37,7 +37,7 @@ Load the module and companion Lisp macros:
 Or with `require` after adding to `load-path`:
 
 ```elisp
-(add-to-list 'load-path "/path/to/emacs-io/src")
+(add-to-list 'load-path "/path/to/emacs-io/lisp")
 (require 'emacs-io-macros)
 ```
 
@@ -269,21 +269,24 @@ dispatch.
 ## Architecture
 
 ```
-src/stream.h     — cl_stream struct, vtable, impl structs, public API
-src/stream.c     — dispatch layer: lock, 256-slot pushback ring, call vtable, live-stream registry
+src/stream.h     — cl_stream struct, vtable, impl structs, mem_cursor, public API
+src/stream.c     — dispatch layer, in-memory cursor ops, live-stream registry, allocation
 src/fdstream.c   — POSIX fd I/O with 8 KB userspace ring buffers
 src/mmapstream.c — mmap-backed input for regular files (zero-copy reads)
-src/strstream.c  — string-input (cursor), string-output (block-chain)
-src/bufstream.c  — buffer input (snapshot), buffer output (insert), buffer I/O (bidirectional)
+src/strstream.c  — string-input (mem_cursor), string-output (block-chain)
+src/bufstream.c  — buffer input (mem_cursor), buffer output (insert), buffer I/O (bidirectional)
 src/reader.c     — cl-read-char, cl-read-line (CRLF-aware), bulk chunk read, read-delimited-list
 src/printer.c    — cl-write-*, terpri, fresh-line, flush/force/finish/clear
 src/fileio.c     — cl-open, cl-close, predicates, file-position, file-length, ftruncate
 src/lispio.c     — cl-read (→ read-from-string), cl-prin1/princ/print/pprint, cl-write
 src/stdstream.c  — standard stream variable init
 src/compstream.c — synonym, broadcast, concatenated, two-way, echo streams
-src/util.c/h     — emacs_env wrappers, defun trampoline, kw_eq, strbuf, seq_classify, stream_or_error, symbol cache
-src/emacs-io.c   — emacs_module_init, 68 defun registrations
-src/emacs-io-macros.el — cl-with-open-file, cl-with-open-stream macros
+src/util.c/h     — emacs_env wrappers, defun trampoline, seq_classify, stream_or_error, eof_result
+src/syms.h       — pre-interned symbol table
+src/strbuf.h     — growable byte buffer
+src/subrs.h      — declarations of every registered subr
+src/emacs-io.c   — emacs_module_init + subr registration table
+lisp/emacs-io-macros.el — cl-with-open-file, cl-with-open-stream macros
 ```
 
 Every I/O operation acquires a per-stream `pthread_mutex_t`.  Streams are
