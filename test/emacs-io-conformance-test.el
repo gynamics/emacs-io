@@ -289,6 +289,40 @@
   (cl-conf--in "1 2 3"
     (should-error (cl-read-delimited-list ?\) s) :type 'end-of-file)))
 
+;; ── large streams (regressions: the pushback ring used to overflow, and
+;;    tokens split across a 4 KB read-chunk boundary used to be truncated) ──
+
+(ert-deftest cl-conf-read-line-large-stream ()
+  "cl-read-line must not lose lines once the stream exceeds one read chunk."
+  (let* ((n 2000)
+         (text (mapconcat (lambda (i) (format "line %d" i))
+                          (number-sequence 1 n) "\n")))
+    (cl-conf--in (concat text "\n")
+      (let ((count 0) (last nil) line)
+        (while (setq line (car (cl-read-line s nil nil)))
+          (setq count (1+ count) last line))
+        (should (= count n))
+        (should (equal last (format "line %d" n)))))))
+
+(ert-deftest cl-conf-read-many-forms-large-stream ()
+  "cl-read must return every form of a large stream, in order."
+  (let* ((n 3000)
+         (text (mapconcat #'number-to-string (number-sequence 1 n) " ")))
+    (cl-conf--in text
+      (let ((i 0) (ok t))
+        (while (< i n)
+          (let ((v (cl-read s nil :eof)))
+            (unless (eql v (1+ i)) (setq ok nil))
+            (setq i (1+ i))))
+        (should ok)
+        (should (eq (cl-read s nil :eof) :eof))))))
+
+(ert-deftest cl-conf-read-token-spans-chunk-boundary ()
+  "A token longer than the 4 KB read chunk is read whole."
+  (let ((sym (make-string 5000 ?a)))
+    (cl-conf--in sym
+      (should (equal (cl-read s) (intern sym))))))
+
 ;; ── WRITE-CHAR / WRITE-STRING / WRITE-LINE / WRITE-BYTE ───────────────────
 
 (ert-deftest cl-conf-write-char-returns-char ()

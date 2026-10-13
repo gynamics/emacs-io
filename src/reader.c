@@ -70,8 +70,8 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
         return syms.v_nil;
       }
       /* push leftover in forward order (FIFO queue: first in → first out) */
-      for (ptrdiff_t i = nl_off + skip; i < r; i++)
-        stream_unread(s, chunk[i]);
+      if (nl_off + skip < r)
+        stream_unread_bulk(s, chunk + nl_off + skip, r - (nl_off + skip));
       saw_newline = true;
       break;
     }
@@ -474,8 +474,20 @@ static bool read_object_from_stream(emacs_env *env, cl_stream_t *s,
   unsigned char chunk[4096];
   for (;;) {
     if (sb->len > 0) {
-      if (try_read_from_buffer(env, sb, result, consumed))
-        return true;
+      if (try_read_from_buffer(env, sb, result, consumed)) {
+        /* A form that consumed the whole buffer might be the prefix of a
+           longer token split across a chunk boundary (e.g. the digits 412
+           ending one read and 345 starting the next).  Unless the parse
+           stopped at a delimiter inside the buffer, keep reading until a
+           delimiter or EOF confirms the token is complete. */
+        if (*consumed < (ptrdiff_t)sb->len)
+          return true;
+        unsigned char more;
+        if (stream_read(s, &more, 1) <= 0)
+          return true;                 /* EOF: the form is complete */
+        strbuf_append(sb, (const char *)&more, 1);
+        continue;                       /* re-parse with the extra byte */
+      }
       if (env->non_local_exit_check(env) != emacs_funcall_exit_return)
         return false;
     }
@@ -529,8 +541,9 @@ static emacs_value read_form(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   if (!preserve_ws && first < (ptrdiff_t)sb->len &&
       read_ws_byte(sb->data[first]))
     first++;
-  for (ptrdiff_t i = first; i < (ptrdiff_t)sb->len; i++)
-    stream_unread(s, (unsigned char)sb->data[i]);
+  if (first < (ptrdiff_t)sb->len)
+    stream_unread_bulk(s, (const unsigned char *)sb->data + first,
+                       (ptrdiff_t)sb->len - first);
 
   strbuf_free(sb);
   return result;

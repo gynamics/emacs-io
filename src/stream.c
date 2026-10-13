@@ -128,7 +128,7 @@ ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
     unsigned char *dest = (unsigned char *)buf;
     while (s->pushback_head != s->pushback_tail && count < n) {
       dest[count++] = (unsigned char)s->pushback_chars[s->pushback_head];
-      s->pushback_head = (s->pushback_head + 1) & 255;
+      s->pushback_head = (s->pushback_head + 1) & (CL_PUSHBACK_SIZE - 1);
     }
     UNLOCK(s);
     return count;
@@ -211,10 +211,22 @@ bool stream_listen(cl_stream_t *s) {
 void stream_unread(cl_stream_t *s, int ch) {
   if (!s) return;
   LOCK(s);
-  int next = (s->pushback_tail + 1) & 255;
+  int next = (s->pushback_tail + 1) & (CL_PUSHBACK_SIZE - 1);
   if (next == s->pushback_head) { UNLOCK(s); return; }
   s->pushback_chars[s->pushback_tail] = ch;
   s->pushback_tail = next;
+  UNLOCK(s);
+}
+
+void stream_unread_bulk(cl_stream_t *s, const unsigned char *data, ptrdiff_t n) {
+  if (!s || !data || n <= 0) return;
+  LOCK(s);
+  for (ptrdiff_t i = 0; i < n; i++) {
+    int next = (s->pushback_tail + 1) & (CL_PUSHBACK_SIZE - 1);
+    if (next == s->pushback_head) break;   /* ring full: drop the rest */
+    s->pushback_chars[s->pushback_tail] = data[i];
+    s->pushback_tail = next;
+  }
   UNLOCK(s);
 }
 

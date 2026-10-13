@@ -70,7 +70,7 @@ static const subr_def_t subrs[] = {
     "\n"
     "CHARACTER must be the most recent character read from STREAM.\n"
     "STREAM defaults to `*standard-input*'.\n"
-    "The pushback buffer holds up to 256 characters.\n"
+    "The pushback buffer holds up to 8191 characters.\n"
     "\n(fn CHARACTER &optional STREAM)" },
 
   { "cl-listen", Flisten, 0, 1,
