@@ -68,9 +68,9 @@ static const subr_def_t subrs[] = {
   { "cl-unread-char", Funread_char, 1, 2,
     "Return CHARACTER to STREAM so it will be read again.\n"
     "\n"
-    "CHARACTER must be the most recent character read from STREAM.\n"
+    "CHARACTER must be the most recent character read from STREAM, and it\n"
+    "is an error to unread twice without an intervening read (CL).\n"
     "STREAM defaults to `*standard-input*'.\n"
-    "The pushback buffer holds up to 255 characters.\n"
     "\n(fn CHARACTER &optional STREAM)" },
 
   { "cl-listen", Flisten, 0, 1,
@@ -383,8 +383,9 @@ static const subr_def_t subrs[] = {
   { "cl-ftruncate", Fftruncate, 2, 2,
     "Truncate the file associated with STREAM to LENGTH bytes.\n"
     "\n"
-    "STREAM must be an open file stream backed by a regular file.\n"
-    "Returns t on success, nil if truncation is not supported.\n"
+    "STREAM must be an open stream backed by a regular file; it is an error\n"
+    "to truncate anything else (e.g. a pipe).\n"
+    "Returns t on success.\n"
     "\n(fn STREAM LENGTH)" },
 
   /* ── Lisp reader / printer ────────────────────────────────────────── */

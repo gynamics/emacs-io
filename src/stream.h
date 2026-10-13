@@ -99,6 +99,13 @@ struct cl_stream {
   int                    pushback_head;
   int                    pushback_tail;
 
+  /* cl-unread-char contract (CL): the character most recently read, and
+     whether an unread is already outstanding (unread twice consecutively is
+     an error).  Updated by the character-reading primitives. */
+  int                    unread_last;
+  bool                   unread_last_valid;
+  bool                   unread_pending;
+
   /* output column tracking for cl-fresh-line */
   ptrdiff_t              column;       /* current column, 0 = BOL */
   int                    last_char;    /* last byte written */

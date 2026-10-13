@@ -449,5 +449,10 @@ emacs_value Fftruncate(emacs_env *env, ptrdiff_t nargs,
     signal_error(env, "cl-ftruncate: length must be non-negative");
     return syms.v_nil;
   }
+  /* Random-access truncation only makes sense for a regular file. */
+  if (!stream_is_regular(s)) {
+    signal_error(env, "cl-ftruncate: stream is not a file");
+    return syms.v_nil;
+  }
   return stream_truncate(s, len) ? syms.v_t : syms.v_nil;
 }

@@ -335,10 +335,12 @@ static ptrdiff_t fds_file_position(cl_stream_t *s) {
 static bool fds_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
   fd_stream_impl_t *fi = (fd_stream_impl_t *)s->impl;
   if (!fi || fi->fd < 0 || pos < 0) return false;
-  /* flush write buffer and discard read buffer before seeking */
   if (fi->wlen > 0) fds_flush(s);
+  /* Seek first: on a non-seekable fd (pipe/socket/tty) this fails and we
+     must leave the read buffer intact. */
+  if (lseek(fi->fd, (off_t)pos, SEEK_SET) < 0) return false;
   fi->rpos = 0; fi->rlen = 0;
-  return lseek(fi->fd, (off_t)pos, SEEK_SET) >= 0;
+  return true;
 }
 
 static ptrdiff_t fds_file_length(cl_stream_t *s) {

@@ -435,7 +435,7 @@
 
 (ert-deftest cl-conf-clear-input ()
   (cl-conf--in "data"
-    (cl-unread-char ?x s)
+    (cl-unread-char (cl-read-char s) s)
     (should (null (cl-clear-input s)))
     (should-not (cl-listen s))))
 
@@ -817,12 +817,30 @@
   ;; :pretty routes through Emacs' pretty-printer
   (should (stringp (cl-write-to-string '(1 (2 3)) :pretty t))))
 
-(ert-deftest cl-conf-unread-char-permissive ()
-  "emacs-io tolerates repeated unread-char (CL allows only one)."
-  (cl-conf--in "x"
-    (dotimes (_ 100) (cl-unread-char ?z s))
-    (should (equal (cl-read-char s) ?z))
-    (should (equal (cl-read-char s) ?z))))
+(ert-deftest cl-conf-unread-char-strict ()
+  "CL: unread must name the last read char and may not repeat."
+  (cl-conf--in "xy"
+    ;; nothing read yet -> nothing to unread
+    (should-error (cl-unread-char ?z s))
+    (should (equal (cl-read-char s) ?x))
+    ;; must be the most recently read character
+    (should-error (cl-unread-char ?y s))
+    ;; unreading the most recent character once is fine
+    (cl-unread-char ?x s)
+    ;; but not twice without an intervening read
+    (should-error (cl-unread-char ?x s))
+    (should (equal (cl-read-char s) ?x))
+    (should (equal (cl-read-char s) ?y))
+    ;; after a new read, the old character is no longer acceptable
+    (should-error (cl-unread-char ?x s))
+    (cl-unread-char ?y s)
+    (should (equal (cl-read-char s) ?y))))
+
+(ert-deftest cl-conf-ftruncate-non-file-signals ()
+  "Truncation requires a real file; anything else is an error."
+  (let ((s (cl-make-string-output-stream)))
+    (should-error (cl-ftruncate s 0))
+    (cl-close s)))
 
 (provide 'emacs-io-conformance-test)
 ;;; emacs-io-conformance-test.el ends here

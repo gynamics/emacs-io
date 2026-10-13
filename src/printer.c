@@ -209,6 +209,8 @@ emacs_value Fclear_input(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   if (s && stream_is_open(s)) {
     pthread_mutex_lock(&s->mutex);
     s->pushback_head = s->pushback_tail = 0;
+    s->unread_last_valid = false;   /* the pushed-back char is gone */
+    s->unread_pending = false;
     if (s->ops && s->ops->clear_input)
       s->ops->clear_input(s);
     pthread_mutex_unlock(&s->mutex);

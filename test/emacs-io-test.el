@@ -553,8 +553,7 @@ CL: skip characters until CHAR is found, then leave CHAR in the stream."
 (ert-deftest emacs-io-test-clear-input ()
   "Test cl-clear-input discards buffered input."
   (emacs-io-test--with-string-input "data"
-    (cl-read-char stream)
-    (cl-unread-char ?x stream)
+    (cl-unread-char (cl-read-char stream) stream)
     (cl-clear-input stream)
     (should-not (cl-listen stream))))
 

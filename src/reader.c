@@ -16,6 +16,26 @@ void check_open(emacs_env *env, cl_stream_t *s, const char *op) {
   }
 }
 
+/* ── cl-unread-char bookkeeping ─────────────────────────────────────────
+   CL requires the unread character to be the most recently read one, and
+   forbids unreading twice without an intervening read.  These helpers keep
+   the per-stream state that Funread_char validates. */
+
+static void note_char_read(cl_stream_t *s, int ch) {
+  if (!s) return;
+  s->unread_last = ch;
+  s->unread_last_valid = true;
+  s->unread_pending = false;
+}
+
+/* Any other read (EOF, bulk, multi-character) clears the "last char" so a
+   following unread cannot claim a stale character. */
+static void note_read_reset(cl_stream_t *s) {
+  if (!s) return;
+  s->unread_last_valid = false;
+  s->unread_pending = false;
+}
+
 /* ── cl-read-char ─────────────────────────────────────────────────────── */
 
 emacs_value Fread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
@@ -27,7 +47,8 @@ emacs_value Fread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   unsigned char ch;
   ptrdiff_t r = stream_read(s, &ch, 1);
-  if (r <= 0) return eof_result(env, s, nargs, args, 1, 2);
+  if (r <= 0) { note_read_reset(s); return eof_result(env, s, nargs, args, 1, 2); }
+  note_char_read(s, (int)ch);
   return eint(env, ch);
 }
 
@@ -53,6 +74,7 @@ emacs_value Fread_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   (void)data;
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
   check_open(env, s, "cl-read-line");
+  note_read_reset(s);
 
   strbuf_t *sb = strbuf_create(256);
   if (!sb) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
@@ -137,7 +159,8 @@ emacs_value Fread_byte(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   unsigned char b;
   ptrdiff_t r = stream_read(s, &b, 1);
-  if (r <= 0) return eof_result(env, s, nargs, args, 1, 2);
+  if (r <= 0) { note_read_reset(s); return eof_result(env, s, nargs, args, 1, 2); }
+  note_char_read(s, (int)b);
   return eint(env, b);
 }
 
@@ -157,6 +180,7 @@ emacs_value Fread_char_no_hang(emacs_env *env, ptrdiff_t nargs,
 
   if (!stream_listen(s)) {
     if (interactive) return syms.v_nil;
+    note_read_reset(s);
     return eof_result(env, s, nargs, args, 1, 2);
   }
 
@@ -164,8 +188,10 @@ emacs_value Fread_char_no_hang(emacs_env *env, ptrdiff_t nargs,
   ptrdiff_t r = stream_read(s, &ch, 1);
   if (r <= 0) {
     if (interactive) return syms.v_nil;
+    note_read_reset(s);
     return eof_result(env, s, nargs, args, 1, 2);
   }
+  note_char_read(s, (int)ch);
   return eint(env, ch);
 }
 
@@ -203,7 +229,7 @@ emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   for (;;) {
     unsigned char ch;
     ptrdiff_t r = stream_read(s, &ch, 1);
-    if (r <= 0) return eof_result(env, s, nargs, args, 2, 3);
+    if (r <= 0) { note_read_reset(s); return eof_result(env, s, nargs, args, 2, 3); }
 
     if (skip_ws && is_whitespace((int)ch))
       continue;             /* discard whitespace */
@@ -213,6 +239,9 @@ emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
     /* the char to peek at is left in the stream */
     stream_unread(s, ch);
+    s->unread_last = (int)ch;
+    s->unread_last_valid = true;
+    s->unread_pending = true;
     return eint(env, ch);
   }
 }
@@ -222,14 +251,34 @@ emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 emacs_value Funread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                          void *data) {
   (void)data;
-  (void)nargs;
-  (void)args;
-  if (nargs < 1) { signal_error(env, "cl-unread-char requires at least 1 argument"); return syms.v_nil; }
+  if (nargs < 1) {
+    signal_error(env, "cl-unread-char requires at least 1 argument");
+    return syms.v_nil;
+  }
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs,
                                           (nargs >= 2) ? 1 : 0,
                                           syms.var_sin);
-  intmax_t ch = eint_extract(env, args[0]);
-  stream_unread(s, (int)ch);
+  if (!s || !stream_is_open(s)) {
+    signal_error(env, "cl-unread-char: stream is closed");
+    return syms.v_nil;
+  }
+
+  /* CL: CHARACTER must be the most recently read character, and it is an
+     error to unread twice without an intervening read. */
+  int ch = (int)eint_extract(env, args[0]);
+  if (s->unread_pending) {
+    signal_error(env,
+      "cl-unread-char: cannot unread twice without an intervening read");
+    return syms.v_nil;
+  }
+  if (!s->unread_last_valid || ch != s->unread_last) {
+    signal_error(env,
+      "cl-unread-char: CHARACTER must be the most recent character read");
+    return syms.v_nil;
+  }
+
+  stream_unread(s, ch);
+  s->unread_pending = true;
   return syms.v_nil;
 }
 
@@ -260,6 +309,7 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   cl_stream_t *s = euser_ptr_stream_get(env, args[1]);
   if (!s || !stream_is_open(s))
     signal_error(env, "Stream is closed");
+  note_read_reset(s);
 
   ptrdiff_t len;
   cl_seq_kind_t kind = seq_classify(env, seq, &len);
@@ -351,6 +401,7 @@ emacs_value Fread_string(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
 
   cl_stream_t *s = euser_ptr_stream_get(env, args[1]);
   check_open(env, s, "cl-read-string");
+  note_read_reset(s);
 
   /* try zero-copy via direct mapping (mmap streams) */
   const void *daddr = NULL;
@@ -394,6 +445,7 @@ emacs_value Fread_chunk(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
      Read up to MAX-BYTES (default 64KB), return (CHUNK . EOF-P). */
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
   check_open(env, s, "cl-read-chunk");
+  note_read_reset(s);
 
   ptrdiff_t max = 65536;
   if (nargs >= 2) max = eint_extract(env, args[1]);
@@ -484,6 +536,7 @@ static emacs_value read_form(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     signal_error(env, "cl-read: stream is closed");
     return syms.v_nil;
   }
+  note_read_reset(s);
 
   strbuf_t *sb = strbuf_create(256);   /* bytes already consumed for this form */
   if (!sb) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
@@ -628,6 +681,7 @@ emacs_value Fread_delimited_list(emacs_env *env, ptrdiff_t nargs,
   int delim = (int)eint_extract(env, args[0]);
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 1, syms.var_sin);
   check_open(env, s, "cl-read-delimited-list");
+  note_read_reset(s);
 
   /* accumulate chars into buffer, call read-from-string at each form */
   strbuf_t *sb = strbuf_create(256);

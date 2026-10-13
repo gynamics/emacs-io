@@ -22,7 +22,7 @@ ring buffers, zero copy within string streams, and no hook machinery.
 
 ```bash
 make                  # → emacs-io-core.so
-make test             # 230 tests: unit + Common Lisp conformance
+make test             # 231 tests: unit + Common Lisp conformance
 make bench            # 12 performance benchmarks
 ```
 
@@ -324,6 +324,12 @@ zero-copy reads from mmap and string-input streams.
   `cl-yes-or-no-p`, `cl-file-string-length`) live in `emacs-io.el`, which
   requires the core module — so the install directory must be on `load-path`
   and `emacs-io.el` must sit next to `emacs-io-core.so`.
+
+- **`cl-unread-char` is strict (CL)**: `CHARACTER` must be the most recently
+  read character, and unreading twice without an intervening read is an
+  error.  For non-destructive lookahead use `cl-peek-char`.  `cl-ftruncate`
+  likewise requires a regular file and signals otherwise (it cannot apply to
+  a pipe/socket).
 
 - **Windows unsupported**: Linux/BSD/macOS.  Uses `memfd_create`, `O_NONBLOCK`, `fsync`, `mmap`, `pthread`, `ftruncate`.
 
