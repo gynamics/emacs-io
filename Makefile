@@ -48,5 +48,7 @@ test: $(TARGET)
 
 bench: $(TARGET)
 	@rm -f $(BENCH:.el=.elc)
+	@echo "=== byte-compile the Lisp glue (as an install would) ==="
+	@$(EMACS) --batch -Q -L . -f batch-byte-compile $(ENTRY)
 	@echo "=== benchmarks ==="
 	@$(EMACS) --batch -Q -L . -L bench -l $(BENCH) -f ert-run-tests-batch-and-exit

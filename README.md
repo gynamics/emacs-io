@@ -23,7 +23,7 @@ ring buffers, zero copy within string streams, and no hook machinery.
 ```bash
 make                  # → emacs-io-core.so
 make test             # 234 tests: unit + Common Lisp conformance
-make bench            # 12 performance benchmarks
+make bench            # 13 performance benchmarks
 ```
 
 `emacs-io.el` is the entry point: it `require`s the native core module
@@ -268,6 +268,7 @@ equivalent.
 | line read 10 K lines | 2.4 ms | 3.0 ms | **1.3×** |
 | comint incremental 10 K lines | 2.6 ms | 4.3 ms | **1.7×** |
 | grep 10 K lines | 4.2 ms | 4.6 ms | **1.1×** |
+| read 10 K generated S-expressions | 49.6 ms | 3.4 ms | **0.07×** |
 
 Sequence I/O wins by **10–13×** by eliminating per-element C↔Lisp crossings:
 a single C `memcpy` of 100 KB replaces 100,000 iterations of `(aset vec i
@@ -279,6 +280,25 @@ and zero-copy mmap reads, bypassing `write-region` encoding and mode hooks.
 (`stream_advance`); the stream refills its buffer on demand, so nothing is
 over-read, the reader is linear, and no data is lost.  That is what keeps
 `cl-read-line` competitive with `forward-line`/`buffer-substring`.
+
+**`cl-read` is the *object* reader, and it is not a speed win.**  Reading Lisp
+objects means satisfying CL reader semantics — one-character lookahead,
+delimiter discard/preserve, EOF-vs-mid-object, `eof-error-p`/`eof-value` — so
+`cl-read` must feed Emacs' own reader.  A module can only do that through a
+**function stream**, i.e. a Lisp callback per character; there is no way to
+let the C reader pull directly from an emacs-io stream without changing Emacs'
+core (a first-class stream type in `readchar`/`printchar`), which is out of
+scope for a module.  So `cl-read` is roughly **15× slower** than Emacs' native
+`read` from a buffer for these objects — measured with a **byte-compiled**
+`emacs-io.el` (an interpreted glue file is ~5× slower still; `make bench`
+compiles it first, as an install would).
+
+The guidance follows from that: **use `cl-read` only when you actually need to
+read Lisp objects** (e.g. transplanting Common Lisp code).  For raw data it is
+the wrong tool — `cl-read-char` / `cl-read-line` / `cl-read-string` /
+`cl-read-chunk` / `cl-read-sequence` are bulk C transfers that are not
+constrained by Lisp syntax and are 10–13× faster (see the wins above).  Do not
+pay the reader cost to move bytes.
 
 ## Architecture
 

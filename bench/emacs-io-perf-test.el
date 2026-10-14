@@ -371,6 +371,41 @@ buffer (the incremental insert+scan case is covered by comint-10k)."
              n))))
       (lambda (a b) (and (= a b) (= a 100))))))
 
+;; ── Lisp object reading: cl-read vs read-from-string ─────────────────────
+
+(ert-deftest emacs-io-perf-read-objects-10k ()
+  "10K generated S-expressions: cl-read vs Emacs' `read' from a buffer.
+The input is a set of generated objects (distinct symbols/numbers/strings and
+nested lists), serialized once.  Both parsers read that same text; `cl-read'
+drives Emacs' reader from the stream as a function stream (one Lisp->C call per
+character), so it is not a speed win over Emacs' native buffer reader --
+reported without a win assertion (see the README performance notes)."
+  (let* ((n 10000)
+         (text (mapconcat (lambda (i)
+                            (prin1-to-string
+                             (list (intern (format "sym%d" i)) i
+                                   (format "str%d" i) (list i (* i i)))))
+                          (number-sequence 1 n) " ")))
+    (emacs-io-perf--report "read-objects 10K"
+      (emacs-io-perf--time
+       (lambda ()
+         (emacs-io-perf--with-string-input text
+           (let ((k 0))
+             (while (not (eq (cl-read stream nil :eof) :eof))
+               (setq k (1+ k)))
+             k))))
+      (emacs-io-perf--time
+       (lambda ()
+         (with-temp-buffer
+           (insert text)
+           (goto-char (point-min))
+           (let ((m (point-marker)) (k 0))
+             (while (condition-case nil (progn (read m) t) (end-of-file nil))
+               (setq k (1+ k)))
+             k))))
+      (lambda (a b) (and (= a n) (= b n)))
+      nil)))                                  ; object reading is not a speed win
+
 ;; ═══════════════════════════════════════════════════════════════════════════
 
 ;; ── chunked read: cl-read-chunk vs buffer-substring, same chunk size ──────
