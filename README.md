@@ -268,7 +268,7 @@ equivalent.
 | line read 10 K lines | 2.4 ms | 3.0 ms | **1.3×** |
 | comint incremental 10 K lines | 2.6 ms | 4.3 ms | **1.7×** |
 | grep 10 K lines | 4.2 ms | 4.6 ms | **1.1×** |
-| read 10 K generated S-expressions | 36.5 ms | 3.4 ms | **0.09×** |
+| read 10 K generated S-expressions | 20.4 ms | 3.4 ms | **0.17×** |
 
 Sequence I/O wins by **10–13×** by eliminating per-element C↔Lisp crossings:
 a single C `memcpy` of 100 KB replaces 100,000 iterations of `(aset vec i
@@ -284,14 +284,14 @@ over-read, the reader is linear, and no data is lost.  That is what keeps
 **`cl-read` is the *object* reader, and it is not a speed win.**  Reading Lisp
 objects means satisfying CL reader semantics — one-character lookahead,
 delimiter discard/preserve, `eof-error-p`/`eof-value` — so `cl-read` must feed
-Emacs' own reader.  A module can only do that through a **function stream**,
-i.e. a callback per character; there is no way to let the C reader pull
-directly from an emacs-io stream without changing Emacs' core (a first-class
-stream type in `readchar`/`printchar`), which is out of scope for a module.
-So `cl-read` is roughly **11× slower** than Emacs' native `read` from a buffer
-for these objects — measured with a **byte-compiled** `emacs-io.el` (an
-interpreted glue file is ~5× slower still; `make bench` compiles it first, as
-an install would).
+Emacs' own reader.  A module can only do that through a **function stream**;
+there is no way to let the C reader pull directly from an emacs-io stream
+without changing Emacs' core (a first-class stream type in
+`readchar`/`printchar`), which is out of scope for a module.  Ours is a **C
+module function** (`make_function` over a small state struct), not a Lisp
+closure, so there is no Lisp callback per character — but Emacs' reader still
+calls back into the module once per character.  So `cl-read` is roughly **6×
+slower** than Emacs' native `read` from a buffer for these objects.
 
 The guidance follows from that: **use `cl-read` only when you actually need to
 read Lisp objects** (e.g. transplanting Common Lisp code).  For raw data it is
@@ -321,12 +321,10 @@ how Emacs modules cross into the Lisp world, and the design rule is simply
   could be handed to `readchar`/`printchar`, so `cl-read` is forced onto the
   function-stream path — one boundary crossing per character.
 
-There is still headroom in that last path: the reader function is currently an
-**Elisp lambda** that calls the `cl-read-char` subr, i.e. *two* crossings per
-character.  Supplying the reader as a **C module function** (`make_function`
-over a small state struct) would read the stream directly from C and remove the
-Elisp layer, cutting the per-character cost — future work, and one that keeps
-`cl-read` incremental (no over-read).
+That last path is why `cl-read` still loses to native `read`: the crossing is
+unavoidable, but it is now a single C→C call per character (the reader function
+is a module function that pulls straight from the stream), rather than the two
+Elisp→C crossings of a Lisp closure calling `cl-read-char`.
 
 ## Architecture
 
@@ -339,7 +337,8 @@ src/strstream.c  — string-input (mem_cursor), string-output (block-chain)
 src/bufstream.c  — buffer input (mem_cursor), buffer output (insert), buffer I/O (bidirectional)
 src/reader.c     — cl-read-char, cl-read-line (CRLF-aware; windowed via
                    stream_direct + stream_advance), peek/unread/listen, bulk
-                   chunk reads
+                   chunk reads, and cl-read / cl-read-preserving-whitespace
+                   (Emacs' reader over a C module function stream)
 src/printer.c    — cl-write-char/string/line/byte, fresh-line, flush/force/finish/clear
 src/fileio.c     — cl-open, cl-close, predicates, file-position, file-length, ftruncate
 src/stdstream.c  — standard stream variable init
@@ -350,11 +349,10 @@ src/strbuf.h     — growable byte buffer
 src/subrs.h      — declarations of every registered subr
 src/emacs-io.c   — emacs_module_init + subr registration table, provide("emacs-io-core")
 emacs-io.el      — entry point: requires emacs-io-core, then defines the Lisp
-                   layer (cl-read / cl-read-preserving-whitespace /
-                   cl-read-delimited-list, cl-read-from-string, cl-write/-to-string,
-                   cl-io-prin1/princ/print/pprint, cl-terpri, cl-y-or-n-p,
-                   cl-file-string-length, ...) and the cl-with-open-file /
-                   cl-with-open-stream macros
+                   layer (cl-read-delimited-list, cl-read-from-string,
+                   cl-write/-to-string, cl-io-prin1/princ/print/pprint,
+                   cl-terpri, cl-y-or-n-p, cl-file-string-length, ...) and the
+                   cl-with-open-file / cl-with-open-stream macros
 ```
 
 Every I/O operation acquires a per-stream `pthread_mutex_t`.  Streams are
@@ -379,9 +377,9 @@ string-input streams.
   [The module boundary](#the-module-boundary).
 
 - **`cl-read` is incremental**: it drives Emacs' own reader one character at a
-  time straight from the stream (a function stream over `cl-read-char` /
-  `cl-unread-char`), so the reader keeps its own state, does its own
-  one-character lookahead, and nothing is over-read or re-parsed.  It discards
+  time straight from the stream, through a **C module function** (not a Lisp
+  closure), so the reader keeps its own state, does its own one-character
+  lookahead, and nothing is over-read or re-parsed.  It discards
   the single whitespace character that delimits an object (`cl-read-preserving-
   whitespace` keeps it).  End-of-file handling follows Emacs' reader, which
   reports EOF the same way whether or not an object had begun, so `eof-error-p`
@@ -393,8 +391,9 @@ string-input streams.
   re-implementing the reader's internals.  `cl-read-from-string` takes CL
   bounding indices, so an out-of-range `:start`/`:end` signals
   `args-out-of-range`.  The whitespace set (Space, Tab, Newline, Page, Return)
-  is defined once, in C, and exposed to Lisp as a loop-free lookup table, so
-  the reader's per-character callback never hardcodes or loops over it.
+  has a single definition in C, tested with a loop-free `strchr`; the reader
+  uses it directly and `cl-read-from-string` reaches it through
+  `cl--whitespace-p`, so nothing hardcodes or loops over the set.
 
 - **`cl-unread-char` is strict (CL)**: `CHARACTER` must be the most recently
   read character, and unreading twice without an intervening read is an

@@ -14,9 +14,10 @@
 ;; Entry point for the emacs-io package.  It loads the native core module
 ;; (`emacs-io-core', built as emacs-io-core.so), which provides the
 ;; byte/character/sequence primitives, the stream constructors, the
-;; predicates, and `cl-read' (which needs direct access to the stream
-;; pushback ring).  The functions that are just glue over Emacs' own reader
-;; and printer are defined here in Lisp, together with the
+;; predicates, and the object reader (`cl-read' /
+;; `cl-read-preserving-whitespace', which drive Emacs' reader from C through a
+;; module function stream).  The functions that are just glue over Emacs' own
+;; reader and printer are defined here in Lisp, together with the
 ;; `cl-with-open-file' / `cl-with-open-stream' macros.
 ;;
 ;; Put this directory on `load-path' and `(require 'emacs-io)'.
@@ -36,7 +37,11 @@
 (declare-function cl-read-char "emacs-io-core"
                   (&optional stream eof-error-p eof-value recursive-p))
 (declare-function cl-unread-char "emacs-io-core" (character &optional stream))
-(declare-function cl--whitespace-chars "emacs-io-core" ())
+(declare-function cl--whitespace-p "emacs-io-core" (character))
+(declare-function cl-read "emacs-io-core"
+                  (&optional stream eof-error-p eof-value recursive-p))
+(declare-function cl-read-preserving-whitespace "emacs-io-core"
+                  (&optional stream eof-error-p eof-value recursive-p))
 (declare-function cl-peek-char "emacs-io-core"
                   (&optional peek-type stream eof-error-p eof-value recursive-p))
 (declare-function cl-make-string-output-stream "emacs-io-core"
@@ -45,18 +50,9 @@
 
 ;;;; Reader
 
-;; The CL whitespace set is defined once, in C (`cl--whitespace-chars'); the
-;; Lisp layer builds a loop-free lookup from it so the reader's per-character
-;; callback never loops over (or hardcodes) a list of characters.
-(defconst cl--whitespace-table
-  (let ((table (make-bool-vector 128 nil)))
-    (mapc (lambda (char) (aset table char t)) (cl--whitespace-chars))
-    table)
-  "Loop-free lookup of the CL whitespace characters (ASCII).")
-
-(defsubst cl--whitespace-char-p (char)
-  "Return non-nil if CHAR is CL whitespace."
-  (and (< char 128) (aref cl--whitespace-table char)))
+;; cl-read / cl-read-preserving-whitespace live in the C core: they drive
+;; Emacs' own reader through a module function stream (no Lisp callback per
+;; character), and the CL whitespace set is defined once in C.
 
 (cl-defun cl-read-from-string (string &optional (eof-error-p t) eof-value
                                       &key start end preserve-whitespace
@@ -77,58 +73,13 @@ counted in POSITION."
       (let ((pos (cdr result)))
         ;; CL: `read-from-string' consumes the single whitespace character
         ;; that delimits the object, so it is counted in POSITION (e.g.
-        ;; (read-from-string " 1 3 5" t nil :start 2) => 3, 5).
+        ;; (read-from-string " 1 3 5" t nil :start 2) => 3, 5).  The
+        ;; whitespace test is the one C definition.
         (when (and (not preserve-whitespace)
                    (< pos end)
-                   (cl--whitespace-char-p (aref string pos)))
+                   (cl--whitespace-p (aref string pos)))
           (setq pos (1+ pos)))
         (cons (car result) pos)))))
-
-(cl-defun cl-read (&optional stream (eof-error-p t) eof-value recursive-p)
-  "Read one Lisp object from STREAM and return it.
-STREAM defaults to `*standard-input*'.
-
-Emacs' own reader is driven one character at a time straight from the
-stream (as a function stream), so it performs its own one-character
-lookahead and nothing is over-read.  If EOF-ERROR-P is nil and the stream
-is exhausted, return EOF-VALUE; otherwise signal `end-of-file'."
-  (ignore recursive-p)
-  (cl--read-form stream eof-error-p eof-value nil))
-
-(cl-defun cl-read-preserving-whitespace (&optional stream (eof-error-p t)
-                                                  eof-value recursive-p)
-  "Like `cl-read' but leaves the delimiting whitespace in STREAM."
-  (ignore recursive-p)
-  (cl--read-form stream eof-error-p eof-value t))
-
-(defun cl--read-form (stream eof-error-p eof-value preserve-whitespace)
-  (let* ((s (or stream (symbol-value '*standard-input*)))
-         (reader
-          (lambda (&optional unread)
-            (if unread
-                ;; Emacs' reader hands back the character that ended the
-                ;; object (its one-char lookahead).  CL's `read' discards that
-                ;; character when it is whitespace; a macro-char terminator
-                ;; (e.g. ")") is kept.  `read-preserving-whitespace' keeps the
-                ;; whitespace too.  The test is a loop-free table lookup.
-                (progn
-                  (unless (and (not preserve-whitespace)
-                               (cl--whitespace-char-p unread))
-                    (cl-unread-char unread s))
-                  nil)
-              (cl-read-char s nil nil))))
-         (result (condition-case nil
-                     (read reader)
-                   (end-of-file :end-of-file))))
-    ;; Emacs' reader reports end of file the same way whether or not an object
-    ;; had begun (e.g. "   " and "(" both signal `end-of-file'), so `cl-read'
-    ;; simply follows it: `eof-error-p' governs.  Ignorable text (blank lines,
-    ;; comments) is skipped by the reader itself, so it too lands here.
-    (if (eq result :end-of-file)
-        (if eof-error-p
-            (signal 'end-of-file (list s))
-          eof-value)
-      result)))
 
 (cl-defun cl-read-delimited-list (char &optional stream recursive-p)
   "Read objects from STREAM until CHAR is seen, and return them as a list.

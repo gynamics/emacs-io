@@ -21,7 +21,7 @@ typedef struct {
   /* Lisp function names */
   emacs_value fn_car, fn_cdr, fn_list, fn_cons, fn_set;
   emacs_value fn_setcar, fn_aset, fn_concat;
-  emacs_value fn_symbol_value, fn_read_from_string, fn_prin1_to_string;
+  emacs_value fn_symbol_value, fn_read, fn_read_from_string, fn_prin1_to_string;
   emacs_value fn_buffer_substring, fn_buffer_size;
   emacs_value fn_error, fn_signal;
 

@@ -21,11 +21,13 @@ CL_SUBR(Fread_byte);
 CL_SUBR(Fread_char_no_hang);
 CL_SUBR(Fpeek_char);
 CL_SUBR(Funread_char);
-CL_SUBR(Fwhitespace_chars);
+CL_SUBR(Fwhitespace_p);
 CL_SUBR(Flisten);
 CL_SUBR(Fread_sequence);
 CL_SUBR(Fread_string);
 CL_SUBR(Fread_chunk);
+CL_SUBR(Fread);
+CL_SUBR(Fread_preserving_whitespace);
 
 /* printer.c */
 CL_SUBR(Fwrite_char);

@@ -214,6 +214,7 @@ void syms_init(emacs_env *env) {
   syms.fn_aset           = G(eintern(env, "aset"));
   syms.fn_concat         = G(eintern(env, "concat"));
   syms.fn_symbol_value   = G(eintern(env, "symbol-value"));
+  syms.fn_read           = G(eintern(env, "read"));
   syms.fn_read_from_string = G(eintern(env, "read-from-string"));
   syms.fn_prin1_to_string = G(eintern(env, "prin1-to-string"));
   syms.fn_buffer_substring = G(eintern(env, "buffer-substring-no-properties"));

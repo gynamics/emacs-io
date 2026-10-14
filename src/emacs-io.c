@@ -75,12 +75,26 @@ static const subr_def_t subrs[] = {
     "STREAM defaults to `*standard-input*'.\n"
     "\n(fn CHARACTER &optional STREAM)" },
 
-  { "cl--whitespace-chars", Fwhitespace_chars, 0, 0,
-    "Internal: return the CL whitespace characters as a string.\n"
+  { "cl--whitespace-p", Fwhitespace_p, 1, 1,
+    "Internal: return non-nil if CHARACTER is CL whitespace.\n"
     "\n"
     "The single definition of the set (Space, Tab, Newline, Page,\n"
-    "Return); the Lisp layer builds its loop-free lookup from it.\n"
-    "\n(fn)" },
+    "Return); a loop-free lookup over it.\n"
+    "\n(fn CHARACTER)" },
+
+  { "cl-read", Fread, 0, 4,
+    "Read one Lisp object from STREAM and return it.\n"
+    "\n"
+    "STREAM defaults to `*standard-input*'.  Emacs' own reader is driven\n"
+    "straight from the stream (as a function stream implemented in C), so\n"
+    "it performs its own one-character lookahead and nothing is over-read.\n"
+    "If EOF-ERROR-P is nil and the stream is exhausted, return EOF-VALUE;\n"
+    "otherwise signal `end-of-file'.\n"
+    "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE RECURSIVE-P)" },
+
+  { "cl-read-preserving-whitespace", Fread_preserving_whitespace, 0, 4,
+    "Like `cl-read' but leaves the delimiting whitespace in STREAM.\n"
+    "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE RECURSIVE-P)" },
 
   { "cl-listen", Flisten, 0, 1,
     "Return non-nil if a character is available on STREAM, nil otherwise.\n"

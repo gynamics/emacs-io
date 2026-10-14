@@ -286,14 +286,15 @@ emacs_value Funread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   return syms.v_nil;
 }
 
-/* ── cl--whitespace-chars (internal glue) ──────────────────────────────── */
+/* ── cl--whitespace-p (internal glue) ──────────────────────────────────── */
 
-/* Expose the canonical whitespace set (see CL_WHITESPACE) so the Lisp layer
-   can build its own loop-free lookup without hardcoding the characters. */
-emacs_value Fwhitespace_chars(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
-                              void *data) {
-  (void)nargs; (void)args; (void)data;
-  return estring(env, CL_WHITESPACE);
+/* CL whitespace test, exposed so the Lisp layer never hardcodes the set. */
+emacs_value Fwhitespace_p(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                          void *data) {
+  (void)data;
+  if (nargs < 1) return syms.v_nil;
+  int ch = (int)eint_extract(env, args[0]);
+  return cl_whitespace_p(ch) ? syms.v_t : syms.v_nil;
 }
 
 /* ── cl-listen ────────────────────────────────────────────────────────── */
@@ -491,5 +492,92 @@ emacs_value Fread_chunk(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   pair_args[0] = chunk;
   pair_args[1] = eof;
   return efuncall_cached(env, syms.fn_cons, 2, pair_args);
+}
+
+/* ── cl-read / cl-read-preserving-whitespace ───────────────────────────── */
+
+/* Emacs' `read' reads objects through a "function stream": a function called
+   with no arguments for the next character, or with one argument to give a
+   character back (its one-character lookahead).  We supply a module function
+   that does that straight from the stream in C, so there is no Lisp callback
+   per character.  CL's `read' discards the single whitespace character that
+   delimits an object; the unread side applies that with cl_whitespace_p,
+   which is a loop-free strchr lookup over the one C definition of the set. */
+
+typedef struct {
+  cl_stream_t *s;
+  bool         drop_ws;   /* cl-read: discard a whitespace delimiter */
+} read_state_t;
+
+static emacs_value reader_fn(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                             void *data) {
+  read_state_t *st = (read_state_t *)data;
+
+  if (nargs > 0 && env->is_not_nil(env, args[0])) {
+    /* `read' hands a character back; discard it first if, per CL, it is the
+       whitespace delimiter of the object being read. */
+    int ch = (int)eint_extract(env, args[0]);
+    if (!(st->drop_ws && cl_whitespace_p(ch))) {
+      stream_unread(st->s, ch);
+      st->s->unread_pending = true;
+    }
+    return syms.v_nil;
+  }
+
+  unsigned char c;
+  ptrdiff_t r = stream_read(st->s, &c, 1);
+  if (r <= 0) { note_read_reset(st->s); return syms.v_nil; }  /* end of file */
+  note_char_read(st->s, (int)c);
+  return eint(env, c);
+}
+
+static emacs_value read_impl(emacs_env *env, cl_stream_t *s, bool preserve,
+                             bool eof_error_p, emacs_value eof_value) {
+  read_state_t st = { s, !preserve };
+  emacs_value fn = env->make_function(env, 0, 1, reader_fn,
+                                      "emacs-io reader function stream", &st);
+  if (!fn) { signal_error(env, "cl-read: cannot create reader function");
+             return syms.v_nil; }
+
+  emacs_value result = env->funcall(env, syms.fn_read, 1, &fn);
+
+  /* Emacs' reader reports end of file the same way whether or not an object
+     had begun, so `eof-error-p' governs (see README).  Clear the pending exit
+     before comparing it; re-signal if it was not end-of-file. */
+  if (env->non_local_exit_check(env) != emacs_funcall_exit_return) {
+    emacs_value errsym, errdata;
+    env->non_local_exit_get(env, &errsym, &errdata);
+    env->non_local_exit_clear(env);
+    if (env->eq(env, errsym, syms.v_end_of_file)) {
+      if (eof_error_p) { signal_end_of_file(env, s); return syms.v_nil; }
+      return eof_value;
+    }
+    env->non_local_exit_signal(env, errsym, errdata);
+    return syms.v_nil;   /* propagate the signal unchanged */
+  }
+  return result;
+}
+
+static emacs_value read_entry(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                              bool preserve, const char *op) {
+  cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sin);
+  check_open(env, s, op);
+  bool eof_error_p = !(nargs >= 2) || env->is_not_nil(env, args[1]);
+  emacs_value eof_value = (nargs >= 3) ? args[2] : syms.v_nil;
+  return read_impl(env, s, preserve, eof_error_p, eof_value);
+}
+
+emacs_value Fread(emacs_env *env, ptrdiff_t nargs, emacs_value *args, void *data) {
+  (void)data;
+  /* (cl-read &optional stream eof-error-p eof-value recursive-p) */
+  return read_entry(env, nargs, args, false, "cl-read");
+}
+
+emacs_value Fread_preserving_whitespace(emacs_env *env, ptrdiff_t nargs,
+                                        emacs_value *args, void *data) {
+  (void)data;
+  /* (cl-read-preserving-whitespace &optional stream eof-error-p eof-value
+      recursive-p) */
+  return read_entry(env, nargs, args, true, "cl-read-preserving-whitespace");
 }
 
