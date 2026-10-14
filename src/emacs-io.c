@@ -388,34 +388,11 @@ static const subr_def_t subrs[] = {
     "Returns t on success.\n"
     "\n(fn STREAM LENGTH)" },
 
-  /* ── Lisp reader / printer ────────────────────────────────────────── */
-  { "cl-read", Fread, 0, 4,
-    "Read one Lisp object from STREAM and return it.\n"
-    "\n"
-    "Reads characters from the stream and feeds them to Emacs'\n"
-    "`read-from-string' incrementally until a complete form is parsed.\n"
-    "STREAM defaults to `*standard-input*'.\n"
-    "If EOF-ERROR-P is nil and end of file is reached before a complete\n"
-    "form, return EOF-VALUE.  Otherwise signal an error on EOF.\n"
-    "RECURSIVE-P is accepted for compatibility and currently ignored.\n"
-    "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE RECURSIVE-P)" },
-
-  { "cl-read-preserving-whitespace", Fread_preserving_whitespace, 0, 4,
-    "Read one Lisp object from STREAM, preserving trailing whitespace.\n"
-    "\n"
-    "Like `cl-read' but does not consume trailing whitespace.\n"
-    "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE RECURSIVE-P)" },
-
-  { "cl-read-delimited-list", Fread_delimited_list, 1, 3,
-    "Read objects from STREAM until CHAR is seen, return as a list.\n"
-    "\n"
-    "CHAR is the delimiter character (an integer).\n"
-    "STREAM defaults to `*standard-input*'.\n"
-    "The delimiter is consumed; reaching end of file is an error.\n"
-    "\n(fn CHAR &optional STREAM RECURSIVE-P)" },
-
-  /* The remaining Lisp reader/printer functions are implemented by the
-     `emacs-io' package (emacs-io.el), which requires this core module. */
+  /* ── Lisp reader / printer ──────────────────────────────────────────
+     cl-read, cl-read-preserving-whitespace and cl-read-delimited-list are
+     implemented by the `emacs-io' Lisp layer (emacs-io.el) on top of the
+     character primitives and Emacs' own reader, so they are not registered
+     here. */
 };
 
 /* ── module entry point ───────────────────────────────────────────────── */

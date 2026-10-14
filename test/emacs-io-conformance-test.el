@@ -320,6 +320,19 @@
     (cl-conf--in sym
       (should (equal (cl-read s) (intern sym))))))
 
+(ert-deftest cl-conf-read-blank-at-eof ()
+  "CL: blank lines / comments before EOF are not an incomplete object."
+  (cl-conf--in "   "
+    (should (eq (cl-read s nil :eof) :eof)))
+  (cl-conf--in ";;; a comment"
+    (should (eq (cl-read s nil :eof) :eof))))
+
+(ert-deftest cl-conf-read-list-keeps-trailing-space ()
+  "CL: a list's delimiter is `)', so the following whitespace is not eaten."
+  (cl-conf--in "(a b) c"
+    (should (equal (cl-read s) '(a b)))
+    (should (equal (cl-read-char s) ?\s))))
+
 (ert-deftest cl-conf-read-line-from-file ()
   "cl-read-line over a real file stream (feed via the fd window)."
   (cl-conf--tmp f

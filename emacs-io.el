@@ -33,6 +33,11 @@
 (declare-function cl-write-char "emacs-io-core" (character &optional stream))
 (declare-function cl-read-line "emacs-io-core"
                   (&optional stream eof-error-p eof-value recursive-p))
+(declare-function cl-read-char "emacs-io-core"
+                  (&optional stream eof-error-p eof-value recursive-p))
+(declare-function cl-unread-char "emacs-io-core" (character &optional stream))
+(declare-function cl-peek-char "emacs-io-core"
+                  (&optional peek-type stream eof-error-p eof-value recursive-p))
 (declare-function cl-make-string-output-stream "emacs-io-core"
                   (&rest keys))
 (declare-function cl-get-output-stream-string "emacs-io-core" (stream))
@@ -67,6 +72,75 @@ counted in POSITION."
                    (memq (aref string pos) '(?\s ?\t ?\n ?\r ?\f)))
           (setq pos (1+ pos)))
         (cons (car result) pos)))))
+
+(cl-defun cl-read (&optional stream (eof-error-p t) eof-value recursive-p)
+  "Read one Lisp object from STREAM and return it.
+STREAM defaults to `*standard-input*'.
+
+Emacs' own reader is driven one character at a time straight from the
+stream (as a function stream), so it performs its own one-character
+lookahead and nothing is over-read.  If EOF-ERROR-P is nil and end of file
+is reached before an object begins, return EOF-VALUE; an object left
+incomplete at end of file is always an error (as in CL)."
+  (ignore recursive-p)
+  (cl--read-form stream eof-error-p eof-value nil))
+
+(cl-defun cl-read-preserving-whitespace (&optional stream (eof-error-p t)
+                                                  eof-value recursive-p)
+  "Like `cl-read' but leaves the delimiting whitespace in STREAM."
+  (ignore recursive-p)
+  (cl--read-form stream eof-error-p eof-value t))
+
+(defun cl--read-form (stream eof-error-p eof-value preserve-whitespace)
+  (let* ((s (or stream (symbol-value '*standard-input*)))
+         (last nil)                    ; last function-stream call
+         (significant nil)             ; saw a char that starts an object
+         (in-comment nil)
+         (reader
+          (lambda (&optional unread)
+            (if unread
+                ;; Emacs' reader gives a character back (one-char lookahead /
+                ;; delimiter); record it and put it back on the stream.
+                (progn (cl-unread-char unread s)
+                       (setq last unread)
+                       nil)
+              (let ((c (cl-read-char s nil nil)))
+                (setq last 'read)
+                (when c
+                  (cond (in-comment (when (eq c ?\n) (setq in-comment nil)))
+                        ((memq c '(?\s ?\t ?\n ?\r ?\f)))
+                        ((eq c ?\;) (setq in-comment t))
+                        (t (setq significant t))))
+                c))))
+         (result (condition-case nil
+                     (read reader)
+                   (end-of-file :end-of-file))))
+    ;; CL: `read' discards the single whitespace character that delimits the
+    ;; object; `read-preserving-whitespace' leaves it.  The reader handed the
+    ;; delimiter back through the function's unread callback (that is LAST).
+    (when (and (not preserve-whitespace)
+               (memq last '(?\s ?\t ?\n ?\r ?\f)))
+      (cl-read-char s nil nil))
+    (if (eq result :end-of-file)
+        (if (or significant eof-error-p)
+            (signal 'end-of-file (list s))
+          eof-value)
+      result)))
+
+(cl-defun cl-read-delimited-list (char &optional stream recursive-p)
+  "Read objects from STREAM until CHAR is seen, and return them as a list.
+The delimiter is consumed; reaching end of file is an error."
+  (ignore recursive-p)
+  (let ((lst '()) (done nil))
+    (while (not done)
+      (let ((c (cl-peek-char t stream nil :eof)))
+        (cond ((eq c :eof)
+               (signal 'end-of-file '("End of file in read-delimited-list")))
+              ((eql c char)
+               (cl-read-char stream)
+               (setq done t))
+              (t (push (cl-read stream) lst)))))
+    (nreverse lst)))
 
 (defun cl--query-io ()
   (let ((s (and (boundp '*query-io*) (symbol-value '*query-io*))))

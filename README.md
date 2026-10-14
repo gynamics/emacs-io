@@ -22,14 +22,14 @@ ring buffers, zero copy within string streams, and no hook machinery.
 
 ```bash
 make                  # → emacs-io-core.so
-make test             # 232 tests: unit + Common Lisp conformance
+make test             # 234 tests: unit + Common Lisp conformance
 make bench            # 12 performance benchmarks
 ```
 
 `emacs-io.el` is the entry point: it `require`s the native core module
 (`emacs-io-core.so`) — which provides the byte/character/sequence primitives,
-the stream constructors, the predicates and `cl-read` — and then defines the
-reader/printer glue (`cl-write`, `cl-io-prin1`, `cl-pprint`, `cl-read-from-string`,
+the stream constructors and the predicates — and then defines the reader/printer
+glue (`cl-read`, `cl-read-from-string`, `cl-write`, `cl-io-prin1`, `cl-pprint`,
 `cl-terpri`, `cl-y-or-n-p`, ...) plus the `cl-with-open-file` /
 `cl-with-open-stream` macros.
 
@@ -274,11 +274,11 @@ a single C `memcpy` of 100 KB replaces 100,000 iterations of `(aset vec i
 (char-after ...))`.  File I/O wins by **5–10×** via raw `read(2)`/`write(2)`
 and zero-copy mmap reads, bypassing `write-region` encoding and mode hooks.
 
-Line/object reading scans a **non-consuming window** of the stream
+`cl-read-line` scans a **non-consuming window** of the stream
 (`stream_direct`) and advances by exactly the consumed count
 (`stream_advance`); the stream refills its buffer on demand, so nothing is
-over-read, the reader is linear, and no data is lost.  That also keeps
-`cl-read`/`cl-read-line` competitive with `forward-line`/`buffer-substring`.
+over-read, the reader is linear, and no data is lost.  That is what keeps
+`cl-read-line` competitive with `forward-line`/`buffer-substring`.
 
 ## Architecture
 
@@ -289,8 +289,9 @@ src/fdstream.c   — POSIX fd I/O with 4 KB userspace ring buffers
 src/mmapstream.c — mmap-backed input for regular files (zero-copy reads)
 src/strstream.c  — string-input (mem_cursor), string-output (block-chain)
 src/bufstream.c  — buffer input (mem_cursor), buffer output (insert), buffer I/O (bidirectional)
-src/reader.c     — cl-read / cl-read-line (windowed: stream_direct + stream_advance),
-                   cl-read-char, bulk chunk reads, read-delimited-list
+src/reader.c     — cl-read-char, cl-read-line (CRLF-aware; windowed via
+                   stream_direct + stream_advance), peek/unread/listen, bulk
+                   chunk reads
 src/printer.c    — cl-write-char/string/line/byte, fresh-line, flush/force/finish/clear
 src/fileio.c     — cl-open, cl-close, predicates, file-position, file-length, ftruncate
 src/stdstream.c  — standard stream variable init
@@ -301,10 +302,11 @@ src/strbuf.h     — growable byte buffer
 src/subrs.h      — declarations of every registered subr
 src/emacs-io.c   — emacs_module_init + subr registration table, provide("emacs-io-core")
 emacs-io.el      — entry point: requires emacs-io-core, then defines the Lisp
-                   layer (cl-write/-to-string, cl-io-prin1/princ/print/pprint,
-                   cl-io-prin1/princ-to-string, cl-terpri, cl-read-from-string,
-                   cl-y-or-n-p, cl-yes-or-no-p, cl-file-string-length) and the
-                   cl-with-open-file / cl-with-open-stream macros
+                   layer (cl-read / cl-read-preserving-whitespace /
+                   cl-read-delimited-list, cl-read-from-string, cl-write/-to-string,
+                   cl-io-prin1/princ/print/pprint, cl-terpri, cl-y-or-n-p,
+                   cl-file-string-length, ...) and the cl-with-open-file /
+                   cl-with-open-stream macros
 ```
 
 Every I/O operation acquires a per-stream `pthread_mutex_t`.  Streams are
@@ -315,15 +317,18 @@ zero-copy reads from mmap and string-input streams.
 ## Notes
 
 - **C core + Lisp entry point**: `emacs-io-core.so` provides the
-  byte/character/sequence primitives, the stream constructors, the
-  predicates, and `cl-read` / `cl-read-delimited-list` (which need direct
-  access to the stream pushback ring).  Functions that are just glue over
-  Emacs' own reader and printer (`cl-write`, `cl-write-to-string`,
-  `cl-io-prin1`, `cl-princ`, `cl-print`, `cl-pprint`, `cl-io-prin1-to-string`,
-  `cl-princ-to-string`, `cl-terpri`, `cl-read-from-string`, `cl-y-or-n-p`,
-  `cl-yes-or-no-p`, `cl-file-string-length`) live in `emacs-io.el`, which
-  requires the core module — so the install directory must be on `load-path`
-  and `emacs-io.el` must sit next to `emacs-io-core.so`.
+  byte/character/sequence primitives, the stream constructors and the
+  predicates.  The reader/printer glue lives in `emacs-io.el`, which requires
+  the core module — so the install directory must be on `load-path` and
+  `emacs-io.el` must sit next to `emacs-io-core.so`.
+
+- **`cl-read` is incremental**: it drives Emacs' own reader one character at a
+  time straight from the stream (a function stream over `cl-read-char` /
+  `cl-unread-char`), so the reader keeps its own state, does its own
+  one-character lookahead, and nothing is over-read or re-parsed.  It discards
+  the single whitespace character that delimits an object (`cl-read-preserving-
+  whitespace` keeps it), and an object left incomplete at EOF is an error even
+  when `eof-error-p` is nil.
 
 - **`cl-unread-char` is strict (CL)**: `CHARACTER` must be the most recently
   read character, and unreading twice without an intervening read is an

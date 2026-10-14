@@ -25,9 +25,6 @@ CL_SUBR(Flisten);
 CL_SUBR(Fread_sequence);
 CL_SUBR(Fread_string);
 CL_SUBR(Fread_chunk);
-CL_SUBR(Fread_delimited_list);
-CL_SUBR(Fread);
-CL_SUBR(Fread_preserving_whitespace);
 
 /* printer.c */
 CL_SUBR(Fwrite_char);
