@@ -187,10 +187,8 @@ CL: skip characters until CHAR is found, then leave CHAR in the stream."
                   (cl-write-string "b" stream))))
     (should (equal result "a\nb"))))
 
-;; NOTE: cl-fresh-line and cl-prin1 work correctly when called from
-;; regular Lisp code but trigger an ERT byte-compiler quirk
-;; (Emacs 31.0.90) that causes (invalid-function #<user-ptr ...>).
-;; The affected tests are marked :tags '(:ert-quirk).
+;; NOTE: cl-fresh-line and cl-prin1 share their names with Emacs' cl-extra
+;; and cl-print; emacs-io re-asserts its versions if either library loads.
 
 (ert-deftest emacs-io-test-print-trailing-space ()
   "Test cl-print includes trailing space."

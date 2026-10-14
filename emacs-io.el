@@ -203,5 +203,26 @@ OPTIONS are passed to `cl-open'."
          (progn ,@body)
        (cl-close ,var))))
 
+;;;; Names that Emacs' cl-lib also defines
+;;
+;; `cl-print' defines `cl-prin1' and `cl-prin1-to-string', and `cl-extra'
+;; defines `cl-fresh-line'.  All three are autoloads, so loading either
+;; library *after* emacs-io would defun over our stream-aware versions, and
+;; our stream user-ptrs would then reach Emacs' printer (which expects
+;; `standard-output' / printable objects).  Re-assert our definitions
+;; whenever those libraries load, so the result does not depend on order.
+(defconst emacs-io--cl-prin1 (symbol-function 'cl-prin1))
+(defconst emacs-io--cl-prin1-to-string (symbol-function 'cl-prin1-to-string))
+(defconst emacs-io--cl-fresh-line (symbol-function 'cl-fresh-line))
+
+(defun emacs-io--reassert-cl-functions ()
+  "Restore emacs-io's `cl-prin1'/`cl-prin1-to-string'/`cl-fresh-line'."
+  (defalias 'cl-prin1 emacs-io--cl-prin1)
+  (defalias 'cl-prin1-to-string emacs-io--cl-prin1-to-string)
+  (defalias 'cl-fresh-line emacs-io--cl-fresh-line))
+
+(with-eval-after-load 'cl-print (emacs-io--reassert-cl-functions))
+(with-eval-after-load 'cl-extra (emacs-io--reassert-cl-functions))
+
 (provide 'emacs-io)
 ;;; emacs-io.el ends here

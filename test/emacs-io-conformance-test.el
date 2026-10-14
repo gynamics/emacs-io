@@ -2,9 +2,6 @@
 ;;
 ;; Boundary-case tests for the cl-* stream interfaces, written against the
 ;; ANSI Common Lisp specification (CLHS).
-;;
-;; Note: cl-fresh-line / cl-prin1 are probed at load time (not inside a test
-;; lambda) to avoid the ERT byte-compiler quirk described in AGENTS.md.
 
 (require 'ert)
 
@@ -400,27 +397,18 @@
   (should (equal (cl-conf--out (cl-write-string "a" s) (cl-terpri s) (cl-write-string "b" s))
                  "a\nb")))
 
-;; cl-fresh-line (and cl-prin1) trip the ERT byte-compiler quirk (AGENTS.md)
-;; when called even indirectly from an ert-deftest body.  Run the probes at
-;; load time, outside any test lambda, and assert on the captured results.
-(defun cl-conf--fresh-line-after (prefix)
-  "Return (WROTE . ACCUMULATED-OUTPUT) after PREFIX + fresh-line."
-  (let ((*standard-output* (cl-make-string-output-stream)))
-    (cl-write-string prefix *standard-output*)
-    (cons (cl-fresh-line) (cl-get-output-stream-string *standard-output*))))
-
-(defconst cl-conf--fresh-empty (cl-conf--fresh-line-after ""))
-(defconst cl-conf--fresh-mid (cl-conf--fresh-line-after "abc"))
-
 (ert-deftest cl-conf-fresh-line-at-bol-nil ()
-  :tags '(:ert-quirk)
-  (should (null (car cl-conf--fresh-empty))))
+  (let ((*standard-output* (cl-make-string-output-stream)))
+    (should (null (cl-fresh-line)))
+    (cl-close *standard-output*)))
 
 (ert-deftest cl-conf-fresh-line-mid-line-writes-newline ()
   "CL: write a newline and return t when not at the start of a line."
-  :tags '(:ert-quirk)
-  (should (car cl-conf--fresh-mid))
-  (should (equal (cdr cl-conf--fresh-mid) "abc\n")))
+  (let ((*standard-output* (cl-make-string-output-stream)))
+    (cl-write-string "abc" *standard-output*)
+    (should (cl-fresh-line))
+    (should (equal (cl-get-output-stream-string *standard-output*) "abc\n"))
+    (cl-close *standard-output*)))
 
 ;; ── FINISH/FORCE/CLEAR-OUTPUT, CLEAR-INPUT ────────────────────────────────
 
@@ -467,18 +455,11 @@
 (ert-deftest cl-conf-write-print-controls ()
   (should (equal (cl-write-to-string (list 1 2 3 4) :length 2) "(1 2 ...)")))
 
-;; cl-prin1 has the same ERT quirk; probe it at load time.
-(defun cl-conf--prin1 (obj)
-  "Return (RETURN-VALUE . ACCUMULATED-OUTPUT) for (cl-prin1 OBJ)."
-  (let ((*standard-output* (cl-make-string-output-stream)))
-    (cons (cl-prin1 obj) (cl-get-output-stream-string *standard-output*))))
-
-(defconst cl-conf--prin1-result (cl-conf--prin1 "hi"))
-
 (ert-deftest cl-conf-prin1-default-stream ()
-  :tags '(:ert-quirk)
-  (should (equal (car cl-conf--prin1-result) "hi"))     ; returns object
-  (should (equal (cdr cl-conf--prin1-result) "\"hi\"")))
+  (let ((*standard-output* (cl-make-string-output-stream)))
+    (should (equal (cl-prin1 "hi") "hi"))               ; returns object
+    (should (equal (cl-get-output-stream-string *standard-output*) "\"hi\""))
+    (cl-close *standard-output*)))
 
 (ert-deftest cl-conf-princ-print-default-stream ()
   (let ((*standard-output* (cl-make-string-output-stream)))
@@ -840,6 +821,22 @@
   "Truncation requires a real file; anything else is an error."
   (let ((s (cl-make-string-output-stream)))
     (should-error (cl-ftruncate s 0))
+    (cl-close s)))
+
+(ert-deftest cl-conf-not-clobbered-by-cl-print ()
+  "cl-print / cl-extra also define cl-prin1(-to-string) / cl-fresh-line.
+Loading them must not replace our stream-aware versions (a load-order bug
+previously mis-attributed to ERT)."
+  (require 'cl-print)
+  (require 'cl-extra)
+  (let ((s (cl-make-string-output-stream)))
+    (should (equal (cl-prin1 "hi" s) "hi"))          ; ours returns OBJECT
+    (should (equal (cl-get-output-stream-string s) "\"hi\""))
+    (cl-close s))
+  (let ((s (cl-make-string-output-stream)))
+    (cl-write-string "abc" s)
+    (should (cl-fresh-line s))
+    (should (equal (cl-get-output-stream-string s) "abc\n"))
     (cl-close s)))
 
 (provide 'emacs-io-conformance-test)

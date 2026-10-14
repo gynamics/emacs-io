@@ -22,7 +22,7 @@ ring buffers, zero copy within string streams, and no hook machinery.
 
 ```bash
 make                  # → emacs-io-core.so
-make test             # 231 tests: unit + Common Lisp conformance
+make test             # 232 tests: unit + Common Lisp conformance
 make bench            # 12 performance benchmarks
 ```
 
@@ -341,7 +341,12 @@ zero-copy reads from mmap and string-input streams.
 
 - **Common Lisp conformance**: behaviour follows the ANSI spec; `make test` runs the unit tests plus `test/emacs-io-conformance-test.el`, which exercises the CL boundary cases (`cl-open` `:if-exists` defaults to `:error`; `cl-close` of a constructed stream leaves its constituents open; `cl-get-output-stream-string` clears; `cl-write-char` writes UTF-8; `cl-file-position` accepts `:start`/`:end`; and so on).
 
-- **ERT byte-compiler quirk** (Emacs 31.0.90): `cl-fresh-line` and `cl-prin1` misbehave when called — even indirectly — from inside an `ert-deftest` body (for `cl-prin1`, because Emacs' own `cl-print` library also defines an autoloaded `cl-prin1` that wins in byte-compiled code).  The functions work correctly in normal code; the conformance tests probe them at load time, outside any test lambda.
+- **Name collisions with `cl-lib`**: Emacs' `cl-print` defines `cl-prin1` /
+  `cl-prin1-to-string` and `cl-extra` defines `cl-fresh-line`.  emacs-io
+  provides stream-aware versions under the same names and re-asserts them via
+  `with-eval-after-load`, so loading either library (which used to look like an
+  "ERT byte-compiler quirk") can no longer replace them — otherwise our stream
+  `user-ptr`s would reach Emacs' printer.
 
 ## License
 
