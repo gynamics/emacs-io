@@ -133,7 +133,7 @@ static ptrdiff_t fds_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) return total > 0 ? total : 0;
       return -1;
     }
-    if (r == 0) return total > 0 ? total : 0; /* EOF */
+    if (r == 0) { fi->eof = true; return total > 0 ? total : 0; } /* EOF */
     total += r;
     return total;
   }
@@ -144,7 +144,7 @@ static ptrdiff_t fds_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) return total > 0 ? total : 0;
     return -1;
   }
-  if (r == 0) return total > 0 ? total : 0; /* EOF */
+  if (r == 0) { fi->eof = true; return total > 0 ? total : 0; } /* EOF */
   fi->rlen = (size_t)r;
   fi->rpos = 0;
 
@@ -277,8 +277,23 @@ static bool fds_listen(cl_stream_t *s) {
   if (!fi || fi->fd < 0) return false;
   if (!(s->flags & CL_STREAM_FLAG_INPUT)) return false;
 
-  /* data in read buffer */
+  /* Buffered input is immediately available. */
   if (fi->rpos < fi->rlen) return true;
+
+  /* CLHS `listen': on a non-interactive stream it is true except at end of
+     file; only interactive streams are actually probed. */
+  if (!(s->flags & CL_STREAM_FLAG_INTERACTIVE)) {
+    if (fi->eof) return false;
+    /* A regular file can be probed without blocking; a pipe/socket cannot,
+       so assume data is pending (CL treats a non-interactive stream as
+       "not at end of file"). */
+    if (stream_is_regular(s)) {
+      ssize_t r = read(fi->fd, fi->rbuf, fi->rsz);
+      if (r == 0) { fi->eof = true; return false; }
+      if (r > 0) { fi->rlen = (size_t)r; fi->rpos = 0; return true; }
+    }
+    return true;
+  }
 
   struct pollfd pfd;
   pfd.fd = fi->fd;
@@ -286,15 +301,7 @@ static bool fds_listen(cl_stream_t *s) {
   pfd.revents = 0;
 
   int rc = poll(&pfd, 1, 0);
-  if (rc <= 0) return false;
-
-  /* peek one byte into the read buffer */
-  ssize_t r = read(fi->fd, &fi->rbuf[fi->rlen], 1);
-  if (r == 1) {
-    fi->rlen++;
-    return true;
-  }
-  return false;
+  return rc > 0 && (pfd.revents & POLLIN);
 }
 
 /* ── destroy ─────────────────────────────────────────────────────────────︎ */
@@ -340,6 +347,7 @@ static bool fds_set_file_position(cl_stream_t *s, ptrdiff_t pos) {
      must leave the read buffer intact. */
   if (lseek(fi->fd, (off_t)pos, SEEK_SET) < 0) return false;
   fi->rpos = 0; fi->rlen = 0;
+  fi->eof = false;
   return true;
 }
 

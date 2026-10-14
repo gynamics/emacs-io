@@ -174,8 +174,8 @@ emacs_value Fread_char_no_hang(emacs_env *env, ptrdiff_t nargs,
   check_open(env, s, "cl-read-char-no-hang");
 
   /* On an interactive stream, "no character available" means it would block
-     -> nil.  On a non-interactive stream it means end of file, which the
-     usual eof-error-p / eof-value handling applies to (CL). */
+     -> nil.  On a non-interactive stream `listen' is true except at end of
+     file, so this behaves like `cl-read-char' (CL). */
   bool interactive = (s->flags & CL_STREAM_FLAG_INTERACTIVE) != 0;
 
   if (!stream_listen(s)) {

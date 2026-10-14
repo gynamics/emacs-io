@@ -166,6 +166,33 @@
     (cl-read-char s)
     (should-not (cl-listen s))))
 
+(ert-deftest cl-conf-listen-noninteractive-file ()
+  "CL: listen on a non-interactive stream is true except at EOF."
+  (cl-conf--tmp f
+    (with-temp-file f (insert "ab"))
+    (let ((s (cl-open f :direction :input :element-type '(unsigned-byte 8))))
+      (unwind-protect
+          (progn
+            (should (cl-listen s))                 ; not at EOF -> t
+            (should (equal (cl-read-byte s) ?a))
+            (should (cl-listen s))                 ; a byte remains
+            (should (equal (cl-read-byte s) ?b))
+            (should-not (cl-listen s))             ; at EOF -> nil
+            (should (eq (cl-read-byte s nil :eof) :eof)))
+        (cl-close s)))))
+
+(ert-deftest cl-conf-read-char-no-hang-noninteractive-file ()
+  "CL: on a non-interactive stream `read-char-no-hang' is like `read-char'."
+  (cl-conf--tmp f
+    (with-temp-file f (insert "xy"))
+    (let ((s (cl-open f :direction :input :element-type '(unsigned-byte 8))))
+      (unwind-protect
+          (progn
+            (should (equal (cl-read-char-no-hang s) ?x))
+            (should (equal (cl-read-char-no-hang s) ?y))
+            (should (eq (cl-read-char-no-hang s nil :eof) :eof)))
+        (cl-close s)))))
+
 ;; ── READ-SEQUENCE / WRITE-SEQUENCE ────────────────────────────────────────
 
 (ert-deftest cl-conf-read-sequence-vector ()

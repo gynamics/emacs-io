@@ -22,7 +22,7 @@ ring buffers, zero copy within string streams, and no hook machinery.
 
 ```bash
 make                  # → emacs-io-core.so
-make test             # 234 tests: unit + Common Lisp conformance
+make test             # 236 tests: unit + Common Lisp conformance
 make bench            # 13 performance benchmarks
 ```
 
@@ -99,7 +99,7 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 | `cl-read-byte` | `(cl-read-byte stream &optional eof-error-p eof-value)` | Read and return one byte |
 | `cl-peek-char` | `(cl-peek-char &optional peek-type stream eof-error-p eof-value recursive-p)` | Peek next char (`t` skips whitespace; a char skips up to and leaves it) |
 | `cl-unread-char` | `(cl-unread-char character &optional stream)` | Push a character back onto the stream |
-| `cl-listen` | `(cl-listen &optional stream)` | Return t if a character is available to read |
+| `cl-listen` | `(cl-listen &optional stream)` | Return t if a character is available (CL: on a non-interactive stream, t except at EOF) |
 | `cl-write-char` | `(cl-write-char character &optional stream)` | Write a character to the stream |
 | `cl-write-string` | `(cl-write-string string &optional stream &key start end)` | Write a string to the stream |
 | `cl-write-line` | `(cl-write-line string &optional stream &key start end)` | Write a string followed by a newline |
@@ -330,9 +330,11 @@ emacs-io.el      — entry point: requires emacs-io-core, then defines the Lisp
 ```
 
 Every I/O operation acquires a per-stream `pthread_mutex_t`.  Streams are
-flagged `O_NONBLOCK` and queried with `cl-listen` — ready for `select`/`poll`
-event loops.  `cl-read-chunk` and `cl-read-string` use `stream_direct` for
-zero-copy reads from mmap and string-input streams.
+**blocking by default** (a `read(2)` on a pipe/tty/socket waits for data);
+`cl-listen` and `cl-read-char-no-hang` provide the CL non-blocking queries, and
+interactive streams are probed with `poll`.  `cl-read-chunk` and
+`cl-read-string` use `stream_direct` for zero-copy reads from mmap and
+string-input streams.
 
 ## Notes
 
@@ -355,6 +357,13 @@ zero-copy reads from mmap and string-input streams.
   error.  For non-destructive lookahead use `cl-peek-char`.  `cl-ftruncate`
   likewise requires a regular file and signals otherwise (it cannot apply to
   a pipe/socket).
+
+- **Blocking and readiness follow CL**: ordinary reads block on a
+  pipe/tty/socket; `cl-listen` is true except at end of file on a
+  non-interactive stream, and probes an interactive one for immediate
+  availability; `cl-read-char-no-hang` returns `nil` only when an interactive
+  stream would have to wait (on a non-interactive stream it is like
+  `cl-read-char`).
 
 - **Windows unsupported**: Linux/BSD/macOS.  Uses `memfd_create`, `O_NONBLOCK`, `fsync`, `mmap`, `pthread`, `ftruncate`.
 

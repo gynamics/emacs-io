@@ -47,8 +47,10 @@ static const subr_def_t subrs[] = {
   { "cl-read-char-no-hang", Fread_char_no_hang, 0, 3,
     "Read a character from STREAM, or return nil if none is available.\n"
     "\n"
-    "Unlike `cl-read-char', this function never blocks.\n"
-    "If no character is immediately available, it returns nil.\n"
+    "Exactly like `cl-read-char', except that on an interactive stream it\n"
+    "returns nil rather than waiting when no character is immediately\n"
+    "available; on a non-interactive stream it never needs to wait and so\n"
+    "behaves like `cl-read-char' (CL).\n"
     "STREAM defaults to `*standard-input*'.\n"
     "EOF-ERROR-P and EOF-VALUE are accepted for compatibility.\n"
     "\n(fn &optional STREAM EOF-ERROR-P EOF-VALUE)" },
@@ -74,11 +76,11 @@ static const subr_def_t subrs[] = {
     "\n(fn CHARACTER &optional STREAM)" },
 
   { "cl-listen", Flisten, 0, 1,
-    "Return non-nil if a character is available on STREAM.\n"
+    "Return non-nil if a character is available on STREAM, nil otherwise.\n"
     "\n"
-    "This checks whether the next call to `cl-read-char' would\n"
-    "return immediately without blocking, including pushback\n"
-    "characters and buffered data.\n"
+    "On a non-interactive stream this is true except at end of file\n"
+    "(CL); an interactive stream is probed for immediate availability.\n"
+    "Pushback characters and buffered data always count as available.\n"
     "STREAM defaults to `*standard-input*'.\n"
     "\n(fn &optional STREAM)" },
 

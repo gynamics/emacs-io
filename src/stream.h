@@ -127,6 +127,7 @@ typedef struct {
   size_t         wsz;
   size_t         wlen;
   bool           owns_fd;
+  bool           eof;      /* read(2) returned 0 (end of file observed) */
   char          *path;     /* set by cl-open, for :abort cleanup; may be NULL */
   bool           created;  /* true if cl-open created the file */
 } fd_stream_impl_t;
