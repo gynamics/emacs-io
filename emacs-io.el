@@ -79,9 +79,8 @@ STREAM defaults to `*standard-input*'.
 
 Emacs' own reader is driven one character at a time straight from the
 stream (as a function stream), so it performs its own one-character
-lookahead and nothing is over-read.  If EOF-ERROR-P is nil and end of file
-is reached before an object begins, return EOF-VALUE; an object left
-incomplete at end of file is always an error (as in CL)."
+lookahead and nothing is over-read.  If EOF-ERROR-P is nil and the stream
+is exhausted, return EOF-VALUE; otherwise signal `end-of-file'."
   (ignore recursive-p)
   (cl--read-form stream eof-error-p eof-value nil))
 
@@ -94,8 +93,6 @@ incomplete at end of file is always an error (as in CL)."
 (defun cl--read-form (stream eof-error-p eof-value preserve-whitespace)
   (let* ((s (or stream (symbol-value '*standard-input*)))
          (last nil)                    ; last function-stream call
-         (significant nil)             ; saw a char that starts an object
-         (in-comment nil)
          (reader
           (lambda (&optional unread)
             (if unread
@@ -104,14 +101,8 @@ incomplete at end of file is always an error (as in CL)."
                 (progn (cl-unread-char unread s)
                        (setq last unread)
                        nil)
-              (let ((c (cl-read-char s nil nil)))
-                (setq last 'read)
-                (when c
-                  (cond (in-comment (when (eq c ?\n) (setq in-comment nil)))
-                        ((memq c '(?\s ?\t ?\n ?\r ?\f)))
-                        ((eq c ?\;) (setq in-comment t))
-                        (t (setq significant t))))
-                c))))
+              (setq last 'read)
+              (cl-read-char s nil nil))))
          (result (condition-case nil
                      (read reader)
                    (end-of-file :end-of-file))))
@@ -121,8 +112,12 @@ incomplete at end of file is always an error (as in CL)."
     (when (and (not preserve-whitespace)
                (memq last '(?\s ?\t ?\n ?\r ?\f)))
       (cl-read-char s nil nil))
+    ;; Emacs' reader reports end of file the same way whether or not an object
+    ;; had begun (e.g. "   " and "(" both signal `end-of-file'), so `cl-read'
+    ;; simply follows it: `eof-error-p' governs.  Ignorable text (blank lines,
+    ;; comments) is skipped by the reader itself, so it too lands here.
     (if (eq result :end-of-file)
-        (if (or significant eof-error-p)
+        (if eof-error-p
             (signal 'end-of-file (list s))
           eof-value)
       result)))

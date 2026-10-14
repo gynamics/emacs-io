@@ -283,7 +283,7 @@ over-read, the reader is linear, and no data is lost.  That is what keeps
 
 **`cl-read` is the *object* reader, and it is not a speed win.**  Reading Lisp
 objects means satisfying CL reader semantics — one-character lookahead,
-delimiter discard/preserve, EOF-vs-mid-object, `eof-error-p`/`eof-value` — so
+delimiter discard/preserve, `eof-error-p`/`eof-value` — so
 `cl-read` must feed Emacs' own reader.  A module can only do that through a
 **function stream**, i.e. a Lisp callback per character; there is no way to
 let the C reader pull directly from an emacs-io stream without changing Emacs'
@@ -349,8 +349,11 @@ string-input streams.
   `cl-unread-char`), so the reader keeps its own state, does its own
   one-character lookahead, and nothing is over-read or re-parsed.  It discards
   the single whitespace character that delimits an object (`cl-read-preserving-
-  whitespace` keeps it), and an object left incomplete at EOF is an error even
-  when `eof-error-p` is nil.
+  whitespace` keeps it).  End-of-file handling follows Emacs' reader, which
+  reports EOF the same way whether or not an object had begun, so `eof-error-p`
+  governs uniformly (CLHS would always signal for an object left incomplete).
+  Blank lines and comments before EOF are skipped by the reader itself and so
+  yield `eof-value` when `eof-error-p` is nil.
 
 - **`cl-unread-char` is strict (CL)**: `CHARACTER` must be the most recently
   read character, and unreading twice without an intervening read is an

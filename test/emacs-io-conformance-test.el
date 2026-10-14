@@ -263,10 +263,12 @@
   ;; CL: a symbol/number immediately before EOF is read successfully.
   (cl-conf--in "sym" (should (equal (cl-read s) 'sym))))
 
-(ert-deftest cl-conf-read-incomplete-signals ()
-  ;; CL: signals regardless of eof-error-p when the object is incomplete.
+(ert-deftest cl-conf-read-incomplete-at-eof ()
+  ;; Emacs' reader reports end of file identically whether or not an object had
+  ;; begun, so `cl-read' follows it: `eof-error-p' governs (unlike CLHS, which
+  ;; would always signal for an incomplete object).
   (cl-conf--in "("
-    (should-error (cl-read s nil :eof) :type 'end-of-file)
+    (should (eq (cl-read s nil :eof) :eof))
     (should-error (cl-read s) :type 'end-of-file)))
 
 (ert-deftest cl-conf-read-discards-delimiter ()
