@@ -299,6 +299,15 @@
   (should (eq (cl-read-from-string "" nil :eof) :eof))
   (should-error (cl-read-from-string "") :type 'end-of-file))
 
+(ert-deftest cl-conf-read-from-string-bounds ()
+  "CL: :start/:end are bounding indices; out-of-range values signal."
+  (should-error (cl-read-from-string "abc" t nil :end 10)
+                :type 'args-out-of-range)
+  (should-error (cl-read-from-string "abc" t nil :start 10)
+                :type 'args-out-of-range)
+  (should-error (cl-read-from-string "abc" t nil :start 2 :end 1)
+                :type 'args-out-of-range))
+
 ;; ── READ-DELIMITED-LIST ───────────────────────────────────────────────────
 
 (ert-deftest cl-conf-read-delimited-list ()

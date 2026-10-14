@@ -48,25 +48,22 @@
                                       &key start end preserve-whitespace
                                       &allow-other-keys)
   "Read one Lisp object from STRING and return (VALUE . POSITION).
-Keywords :START and :END delimit the substring to read.
+:START and :END are CL bounding indices delimiting the substring to
+read; an out-of-range index signals `args-out-of-range'.
 If :PRESERVE-WHITESPACE is non-nil, the delimiting whitespace is not
 counted in POSITION."
-  (let* ((len (length string))
-         (start (max 0 (or start 0)))
-         (end (let ((e (or end len)))
-                (if (or (< e 0) (> e len)) len e)))
+  (let* ((end (or end (length string)))
          (result (condition-case nil
-                     (read-from-string string start end)
+                     (read-from-string string (or start 0) end)
                    (end-of-file :eof))))
     (if (eq result :eof)
         (if eof-error-p
             (signal 'end-of-file '("End of file on string"))
           eof-value)
       (let ((pos (cdr result)))
-        ;; Unless :preserve-whitespace, consume the single whitespace
-        ;; character that delimits the object (as CL's reader does), so
-        ;; POSITION matches CLHS: (read-from-string " 1 3 5" t nil :start 2)
-        ;; => 3, 5.
+        ;; CL: `read-from-string' consumes the single whitespace character
+        ;; that delimits the object, so it is counted in POSITION (e.g.
+        ;; (read-from-string " 1 3 5" t nil :start 2) => 3, 5).
         (when (and (not preserve-whitespace)
                    (< pos end)
                    (memq (aref string pos) '(?\s ?\t ?\n ?\r ?\f)))
@@ -92,26 +89,23 @@ is exhausted, return EOF-VALUE; otherwise signal `end-of-file'."
 
 (defun cl--read-form (stream eof-error-p eof-value preserve-whitespace)
   (let* ((s (or stream (symbol-value '*standard-input*)))
-         (last nil)                    ; last function-stream call
          (reader
           (lambda (&optional unread)
             (if unread
-                ;; Emacs' reader gives a character back (one-char lookahead /
-                ;; delimiter); record it and put it back on the stream.
-                (progn (cl-unread-char unread s)
-                       (setq last unread)
-                       nil)
-              (setq last 'read)
+                ;; Emacs' reader hands back the character that ended the
+                ;; object (its one-char lookahead).  CL's `read' discards that
+                ;; character when it is whitespace; a macro-char terminator
+                ;; (e.g. ")") is never discarded.  `read-preserving-whitespace'
+                ;; keeps the whitespace.
+                (progn
+                  (unless (and (not preserve-whitespace)
+                               (memq unread '(?\s ?\t ?\n ?\r ?\f)))
+                    (cl-unread-char unread s))
+                  nil)
               (cl-read-char s nil nil))))
          (result (condition-case nil
                      (read reader)
                    (end-of-file :end-of-file))))
-    ;; CL: `read' discards the single whitespace character that delimits the
-    ;; object; `read-preserving-whitespace' leaves it.  The reader handed the
-    ;; delimiter back through the function's unread callback (that is LAST).
-    (when (and (not preserve-whitespace)
-               (memq last '(?\s ?\t ?\n ?\r ?\f)))
-      (cl-read-char s nil nil))
     ;; Emacs' reader reports end of file the same way whether or not an object
     ;; had begun (e.g. "   " and "(" both signal `end-of-file'), so `cl-read'
     ;; simply follows it: `eof-error-p' governs.  Ignorable text (blank lines,

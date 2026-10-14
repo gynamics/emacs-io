@@ -268,7 +268,7 @@ equivalent.
 | line read 10 K lines | 2.4 ms | 3.0 ms | **1.3×** |
 | comint incremental 10 K lines | 2.6 ms | 4.3 ms | **1.7×** |
 | grep 10 K lines | 4.2 ms | 4.6 ms | **1.1×** |
-| read 10 K generated S-expressions | 42.0 ms | 3.4 ms | **0.08×** |
+| read 10 K generated S-expressions | 36.5 ms | 3.4 ms | **0.09×** |
 
 Sequence I/O wins by **10–13×** by eliminating per-element C↔Lisp crossings:
 a single C `memcpy` of 100 KB replaces 100,000 iterations of `(aset vec i
@@ -288,7 +288,7 @@ Emacs' own reader.  A module can only do that through a **function stream**,
 i.e. a callback per character; there is no way to let the C reader pull
 directly from an emacs-io stream without changing Emacs' core (a first-class
 stream type in `readchar`/`printchar`), which is out of scope for a module.
-So `cl-read` is roughly **12× slower** than Emacs' native `read` from a buffer
+So `cl-read` is roughly **11× slower** than Emacs' native `read` from a buffer
 for these objects — measured with a **byte-compiled** `emacs-io.el` (an
 interpreted glue file is ~5× slower still; `make bench` compiles it first, as
 an install would).
@@ -387,7 +387,12 @@ string-input streams.
   reports EOF the same way whether or not an object had begun, so `eof-error-p`
   governs uniformly (CLHS would always signal for an object left incomplete).
   Blank lines and comments before EOF are skipped by the reader itself and so
-  yield `eof-value` when `eof-error-p` is nil.
+  yield `eof-value` when `eof-error-p` is nil.  The object reader is a thin
+  CL-shaped surface over Emacs' reader: it presents CL's contract (delimiter
+  discard/preserve, `cl-read-from-string` position past the delimiter) without
+  re-implementing the reader's internals.  `cl-read-from-string` takes CL
+  bounding indices, so an out-of-range `:start`/`:end` signals
+  `args-out-of-range`.
 
 - **`cl-unread-char` is strict (CL)**: `CHARACTER` must be the most recently
   read character, and unreading twice without an intervening read is an
