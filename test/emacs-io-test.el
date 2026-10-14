@@ -187,8 +187,8 @@ CL: skip characters until CHAR is found, then leave CHAR in the stream."
                   (cl-write-string "b" stream))))
     (should (equal result "a\nb"))))
 
-;; NOTE: cl-fresh-line and cl-prin1 share their names with Emacs' cl-extra
-;; and cl-print; emacs-io re-asserts its versions if either library loads.
+;; NOTE: our stream-aware printer/line names are cl-io-* so they do not
+;; shadow Emacs' cl-prin1 / cl-prin1-to-string / cl-fresh-line (cl-lib).
 
 (ert-deftest emacs-io-test-print-trailing-space ()
   "Test cl-print includes trailing space."
@@ -371,11 +371,11 @@ CL: skip characters until CHAR is found, then leave CHAR in the stream."
 ;; ── Lisp Printer ─────────────────────────────────────────────────────────
 
 (ert-deftest emacs-io-test-prin1-to-string ()
-  "cl-prin1-to-string produces READable output."
-  (should (equal (cl-prin1-to-string "hi") "\"hi\""))
-  (should (equal (cl-prin1-to-string 42) "42"))
-  (should (equal (cl-prin1-to-string 'hello) "hello"))
-  (should (equal (cl-prin1-to-string '(a b c)) "(a b c)")))
+  "cl-io-prin1-to-string produces READable output."
+  (should (equal (cl-io-prin1-to-string "hi") "\"hi\""))
+  (should (equal (cl-io-prin1-to-string 42) "42"))
+  (should (equal (cl-io-prin1-to-string 'hello) "hello"))
+  (should (equal (cl-io-prin1-to-string '(a b c)) "(a b c)")))
 
 (ert-deftest emacs-io-test-princ-to-string ()
   "cl-princ-to-string produces human-readable output (no string quotes)."

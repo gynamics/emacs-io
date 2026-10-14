@@ -140,13 +140,13 @@ emacs_value Fwrite_byte(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   return args[0];
 }
 
-/* ── cl-fresh-line ────────────────────────────────────────────────────── */
+/* ── cl-io-fresh-line ─────────────────────────────────────────────────── */
 
 emacs_value Ffresh_line(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                          void *data) {
   (void)data;
   cl_stream_t *s = get_stream_or_default_cached(env, args, nargs, 0, syms.var_sout);
-  check_open(env, s, "cl-fresh-line");
+  check_open(env, s, "cl-io-fresh-line");
 
   /* column 0 or last char was newline → already at BOL */
   if (s->column == 0 || s->last_char == '\n')

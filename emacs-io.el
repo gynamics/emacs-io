@@ -99,8 +99,9 @@ counted in POSITION."
 
 ;;;; Printer
 
-(defun cl-prin1-to-string (object)
-  "Return a string containing OBJECT printed in a form suitable for `cl-read'."
+(defun cl-io-prin1-to-string (object)
+  "Return a string containing OBJECT printed in a form suitable for `cl-read'.
+Like Emacs' `cl-prin1-to-string', but distinct so it does not shadow it."
   (prin1-to-string object))
 
 (defun cl--princ-string (object)
@@ -111,8 +112,9 @@ counted in POSITION."
   "Return a string containing OBJECT printed in a human-readable form."
   (cl--princ-string object))
 
-(defun cl-prin1 (object &optional stream)
-  "Output OBJECT to STREAM in a form suitable for `cl-read'.  Return OBJECT."
+(defun cl-io-prin1 (object &optional stream)
+  "Output OBJECT to STREAM in a form suitable for `cl-read'.  Return OBJECT.
+Like Emacs' `cl-prin1', but writes to an emacs-io stream."
   (cl-write-string (prin1-to-string object) stream)
   object)
 
@@ -125,7 +127,7 @@ counted in POSITION."
   "Output a newline, then OBJECT (via PRIN1), then a space, to STREAM.
 Return OBJECT."
   (cl-write-char ?\n stream)
-  (cl-prin1 object stream)
+  (cl-io-prin1 object stream)
   (cl-write-char ?\s stream)
   object)
 
@@ -203,26 +205,10 @@ OPTIONS are passed to `cl-open'."
          (progn ,@body)
        (cl-close ,var))))
 
-;;;; Names that Emacs' cl-lib also defines
-;;
-;; `cl-print' defines `cl-prin1' and `cl-prin1-to-string', and `cl-extra'
-;; defines `cl-fresh-line'.  All three are autoloads, so loading either
-;; library *after* emacs-io would defun over our stream-aware versions, and
-;; our stream user-ptrs would then reach Emacs' printer (which expects
-;; `standard-output' / printable objects).  Re-assert our definitions
-;; whenever those libraries load, so the result does not depend on order.
-(defconst emacs-io--cl-prin1 (symbol-function 'cl-prin1))
-(defconst emacs-io--cl-prin1-to-string (symbol-function 'cl-prin1-to-string))
-(defconst emacs-io--cl-fresh-line (symbol-function 'cl-fresh-line))
-
-(defun emacs-io--reassert-cl-functions ()
-  "Restore emacs-io's `cl-prin1'/`cl-prin1-to-string'/`cl-fresh-line'."
-  (defalias 'cl-prin1 emacs-io--cl-prin1)
-  (defalias 'cl-prin1-to-string emacs-io--cl-prin1-to-string)
-  (defalias 'cl-fresh-line emacs-io--cl-fresh-line))
-
-(with-eval-after-load 'cl-print (emacs-io--reassert-cl-functions))
-(with-eval-after-load 'cl-extra (emacs-io--reassert-cl-functions))
+;; `cl-print' and `cl-extra' already define `cl-prin1', `cl-prin1-to-string'
+;; and `cl-fresh-line'; to avoid shadowing Emacs' `cl-lib', our stream-aware
+;; counterparts are named `cl-io-prin1', `cl-io-prin1-to-string' and
+;; `cl-io-fresh-line' instead.
 
 (provide 'emacs-io)
 ;;; emacs-io.el ends here

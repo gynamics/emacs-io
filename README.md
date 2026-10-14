@@ -29,7 +29,7 @@ make bench            # 12 performance benchmarks
 `emacs-io.el` is the entry point: it `require`s the native core module
 (`emacs-io-core.so`) — which provides the byte/character/sequence primitives,
 the stream constructors, the predicates and `cl-read` — and then defines the
-reader/printer glue (`cl-write`, `cl-prin1`, `cl-pprint`, `cl-read-from-string`,
+reader/printer glue (`cl-write`, `cl-io-prin1`, `cl-pprint`, `cl-read-from-string`,
 `cl-terpri`, `cl-y-or-n-p`, ...) plus the `cl-with-open-file` /
 `cl-with-open-stream` macros.
 
@@ -105,7 +105,7 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 | `cl-write-line` | `(cl-write-line string &optional stream &key start end)` | Write a string followed by a newline |
 | `cl-write-byte` | `(cl-write-byte byte stream)` | Write a byte to the stream |
 | `cl-terpri` | `(cl-terpri &optional stream)` | Output a newline |
-| `cl-fresh-line` | `(cl-fresh-line &optional stream)` | Output a newline if not at the start of a line |
+| `cl-io-fresh-line` | `(cl-io-fresh-line &optional stream)` | Output a newline if not at the start of a line |
 
 ### Bulk I/O
 
@@ -132,11 +132,11 @@ initialized at module load, mapped to file descriptors 0, 1, and 2.
 | `cl-read` | `(cl-read &optional stream eof-error-p eof-value recursive-p)` | Read one Lisp object from the stream |
 | `cl-read-from-string` | `(cl-read-from-string string &optional eof-error-p eof-value &key start end preserve-whitespace)` | Read one Lisp object from a string |
 | `cl-write` | `(cl-write object &key stream ...)` | Write an object (`:stream` defaults to `*standard-output*`; `:escape nil` prints princ-style) |
-| `cl-prin1` | `(cl-prin1 object &optional stream)` | Write an object in a form readable by `cl-read` |
+| `cl-io-prin1` | `(cl-io-prin1 object &optional stream)` | Write an object in a form readable by `cl-read` |
 | `cl-princ` | `(cl-princ object &optional stream)` | Write an object in human-readable form |
 | `cl-print` | `(cl-print object &optional stream)` | Write a newline, then the object, then a space |
 | `cl-pprint` | `(cl-pprint object &optional stream)` | Pretty-print an object (returns nil) |
-| `cl-prin1-to-string` | `(cl-prin1-to-string object)` | Return a string of the object, readable by `cl-read` |
+| `cl-io-prin1-to-string` | `(cl-io-prin1-to-string object)` | Return a string of the object, readable by `cl-read` |
 | `cl-princ-to-string` | `(cl-princ-to-string object)` | Return a human-readable string of the object |
 | `cl-write-to-string` | `(cl-write-to-string object &key ...)` | Return the printed representation as a string |
 
@@ -301,8 +301,8 @@ src/strbuf.h     — growable byte buffer
 src/subrs.h      — declarations of every registered subr
 src/emacs-io.c   — emacs_module_init + subr registration table, provide("emacs-io-core")
 emacs-io.el      — entry point: requires emacs-io-core, then defines the Lisp
-                   layer (cl-write/-to-string, cl-prin1/princ/print/pprint,
-                   cl-prin1/princ-to-string, cl-terpri, cl-read-from-string,
+                   layer (cl-write/-to-string, cl-io-prin1/princ/print/pprint,
+                   cl-io-prin1/princ-to-string, cl-terpri, cl-read-from-string,
                    cl-y-or-n-p, cl-yes-or-no-p, cl-file-string-length) and the
                    cl-with-open-file / cl-with-open-stream macros
 ```
@@ -319,7 +319,7 @@ zero-copy reads from mmap and string-input streams.
   predicates, and `cl-read` / `cl-read-delimited-list` (which need direct
   access to the stream pushback ring).  Functions that are just glue over
   Emacs' own reader and printer (`cl-write`, `cl-write-to-string`,
-  `cl-prin1`, `cl-princ`, `cl-print`, `cl-pprint`, `cl-prin1-to-string`,
+  `cl-io-prin1`, `cl-princ`, `cl-print`, `cl-pprint`, `cl-io-prin1-to-string`,
   `cl-princ-to-string`, `cl-terpri`, `cl-read-from-string`, `cl-y-or-n-p`,
   `cl-yes-or-no-p`, `cl-file-string-length`) live in `emacs-io.el`, which
   requires the core module — so the install directory must be on `load-path`
@@ -341,12 +341,11 @@ zero-copy reads from mmap and string-input streams.
 
 - **Common Lisp conformance**: behaviour follows the ANSI spec; `make test` runs the unit tests plus `test/emacs-io-conformance-test.el`, which exercises the CL boundary cases (`cl-open` `:if-exists` defaults to `:error`; `cl-close` of a constructed stream leaves its constituents open; `cl-get-output-stream-string` clears; `cl-write-char` writes UTF-8; `cl-file-position` accepts `:start`/`:end`; and so on).
 
-- **Name collisions with `cl-lib`**: Emacs' `cl-print` defines `cl-prin1` /
-  `cl-prin1-to-string` and `cl-extra` defines `cl-fresh-line`.  emacs-io
-  provides stream-aware versions under the same names and re-asserts them via
-  `with-eval-after-load`, so loading either library (which used to look like an
-  "ERT byte-compiler quirk") can no longer replace them — otherwise our stream
-  `user-ptr`s would reach Emacs' printer.
+- **Name collisions with `cl-lib`**: Emacs' `cl-print` already defines `cl-prin1`
+  and `cl-prin1-to-string`, and `cl-extra` defines `cl-fresh-line`.  Rather
+  than shadow them, emacs-io exposes its stream-aware counterparts as
+  `cl-io-prin1`, `cl-io-prin1-to-string` and `cl-io-fresh-line`; it never
+  redefines a `cl-` name that Emacs owns.
 
 ## License
 

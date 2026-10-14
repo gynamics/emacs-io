@@ -140,7 +140,7 @@ static const subr_def_t subrs[] = {
     "Returns BYTE.\n"
     "\n(fn BYTE STREAM)" },
 
-  { "cl-fresh-line", Ffresh_line, 0, 1,
+  { "cl-io-fresh-line", Ffresh_line, 0, 1,
     "Output a newline to STREAM if not at the start of a line.\n"
     "\n"
     "If it is uncertain whether output is at the start of a line,\n"

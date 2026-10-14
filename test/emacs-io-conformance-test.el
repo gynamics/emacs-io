@@ -399,14 +399,14 @@
 
 (ert-deftest cl-conf-fresh-line-at-bol-nil ()
   (let ((*standard-output* (cl-make-string-output-stream)))
-    (should (null (cl-fresh-line)))
+    (should (null (cl-io-fresh-line)))
     (cl-close *standard-output*)))
 
 (ert-deftest cl-conf-fresh-line-mid-line-writes-newline ()
   "CL: write a newline and return t when not at the start of a line."
   (let ((*standard-output* (cl-make-string-output-stream)))
     (cl-write-string "abc" *standard-output*)
-    (should (cl-fresh-line))
+    (should (cl-io-fresh-line))
     (should (equal (cl-get-output-stream-string *standard-output*) "abc\n"))
     (cl-close *standard-output*)))
 
@@ -457,7 +457,7 @@
 
 (ert-deftest cl-conf-prin1-default-stream ()
   (let ((*standard-output* (cl-make-string-output-stream)))
-    (should (equal (cl-prin1 "hi") "hi"))               ; returns object
+    (should (equal (cl-io-prin1 "hi") "hi"))            ; returns object
     (should (equal (cl-get-output-stream-string *standard-output*) "\"hi\""))
     (cl-close *standard-output*)))
 
@@ -477,7 +477,7 @@
     (cl-close s)))
 
 (ert-deftest cl-conf-to-string ()
-  (should (equal (cl-prin1-to-string "hi") "\"hi\""))
+  (should (equal (cl-io-prin1-to-string "hi") "\"hi\""))
   (should (equal (cl-princ-to-string "hi") "hi"))
   (should (equal (cl-write-to-string '(1 2)) "(1 2)")))
 
@@ -823,19 +823,23 @@
     (should-error (cl-ftruncate s 0))
     (cl-close s)))
 
-(ert-deftest cl-conf-not-clobbered-by-cl-print ()
-  "cl-print / cl-extra also define cl-prin1(-to-string) / cl-fresh-line.
-Loading them must not replace our stream-aware versions (a load-order bug
-previously mis-attributed to ERT)."
+(ert-deftest cl-conf-printer-names-distinct-from-emacs ()
+  "We yield `cl-prin1'/`cl-prin1-to-string'/`cl-fresh-line' to Emacs' cl-lib
+and expose stream-aware versions as `cl-io-prin1'/`cl-io-fresh-line' instead."
   (require 'cl-print)
   (require 'cl-extra)
+  ;; Emacs' functions are untouched, ours are separate objects...
+  (should-not (eq (symbol-function 'cl-io-prin1) (symbol-function 'cl-prin1)))
+  (should-not (eq (symbol-function 'cl-io-fresh-line)
+                  (symbol-function 'cl-fresh-line)))
+  ;; ...and ours work on our streams.
   (let ((s (cl-make-string-output-stream)))
-    (should (equal (cl-prin1 "hi" s) "hi"))          ; ours returns OBJECT
+    (should (equal (cl-io-prin1 "hi" s) "hi"))
     (should (equal (cl-get-output-stream-string s) "\"hi\""))
     (cl-close s))
   (let ((s (cl-make-string-output-stream)))
     (cl-write-string "abc" s)
-    (should (cl-fresh-line s))
+    (should (cl-io-fresh-line s))
     (should (equal (cl-get-output-stream-string s) "abc\n"))
     (cl-close s)))
 

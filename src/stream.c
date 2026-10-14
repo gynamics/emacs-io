@@ -148,7 +148,7 @@ ptrdiff_t stream_read(cl_stream_t *s, void *buf, ptrdiff_t n) {
 }
 
 /* Advance the output column/last-char bookkeeping by N written bytes,
-   restarting the column count after the last newline (for cl-fresh-line). */
+   restarting the column count after the last newline (for cl-io-fresh-line). */
 void stream_update_column(cl_stream_t *s, const unsigned char *p, ptrdiff_t n) {
   ptrdiff_t after_nl = 0;
   bool found_nl = false;

@@ -106,7 +106,7 @@ struct cl_stream {
   bool                   unread_last_valid;
   bool                   unread_pending;
 
-  /* output column tracking for cl-fresh-line */
+  /* output column tracking for cl-io-fresh-line */
   ptrdiff_t              column;       /* current column, 0 = BOL */
   int                    last_char;    /* last byte written */
 
