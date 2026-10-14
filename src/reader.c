@@ -197,8 +197,12 @@ emacs_value Fread_char_no_hang(emacs_env *env, ptrdiff_t nargs,
 
 /* ── cl-peek-char ──────────────────────────────────────────────────────── */
 
-static bool is_whitespace(int ch) {
-  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
+/* CL whitespace: Space, Tab, Newline, Page (form feed), Return.  This is the
+   single definition; `strchr' is a loop-free membership test over it. */
+static const char CL_WHITESPACE[] = " \t\n\r\f";
+
+static bool cl_whitespace_p(int ch) {
+  return ch > 0 && ch < 128 && strchr(CL_WHITESPACE, ch) != NULL;
 }
 
 emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
@@ -231,7 +235,7 @@ emacs_value Fpeek_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     ptrdiff_t r = stream_read(s, &ch, 1);
     if (r <= 0) { note_read_reset(s); return eof_result(env, s, nargs, args, 2, 3); }
 
-    if (skip_ws && is_whitespace((int)ch))
+    if (skip_ws && cl_whitespace_p((int)ch))
       continue;             /* discard whitespace */
 
     if (skip_to_char && (int)ch != target)
@@ -280,6 +284,16 @@ emacs_value Funread_char(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   stream_unread(s, ch);
   s->unread_pending = true;
   return syms.v_nil;
+}
+
+/* ── cl--whitespace-chars (internal glue) ──────────────────────────────── */
+
+/* Expose the canonical whitespace set (see CL_WHITESPACE) so the Lisp layer
+   can build its own loop-free lookup without hardcoding the characters. */
+emacs_value Fwhitespace_chars(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
+                              void *data) {
+  (void)nargs; (void)args; (void)data;
+  return estring(env, CL_WHITESPACE);
 }
 
 /* ── cl-listen ────────────────────────────────────────────────────────── */

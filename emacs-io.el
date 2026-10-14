@@ -36,6 +36,7 @@
 (declare-function cl-read-char "emacs-io-core"
                   (&optional stream eof-error-p eof-value recursive-p))
 (declare-function cl-unread-char "emacs-io-core" (character &optional stream))
+(declare-function cl--whitespace-chars "emacs-io-core" ())
 (declare-function cl-peek-char "emacs-io-core"
                   (&optional peek-type stream eof-error-p eof-value recursive-p))
 (declare-function cl-make-string-output-stream "emacs-io-core"
@@ -43,6 +44,19 @@
 (declare-function cl-get-output-stream-string "emacs-io-core" (stream))
 
 ;;;; Reader
+
+;; The CL whitespace set is defined once, in C (`cl--whitespace-chars'); the
+;; Lisp layer builds a loop-free lookup from it so the reader's per-character
+;; callback never loops over (or hardcodes) a list of characters.
+(defconst cl--whitespace-table
+  (let ((table (make-bool-vector 128 nil)))
+    (mapc (lambda (char) (aset table char t)) (cl--whitespace-chars))
+    table)
+  "Loop-free lookup of the CL whitespace characters (ASCII).")
+
+(defsubst cl--whitespace-char-p (char)
+  "Return non-nil if CHAR is CL whitespace."
+  (and (< char 128) (aref cl--whitespace-table char)))
 
 (cl-defun cl-read-from-string (string &optional (eof-error-p t) eof-value
                                       &key start end preserve-whitespace
@@ -66,7 +80,7 @@ counted in POSITION."
         ;; (read-from-string " 1 3 5" t nil :start 2) => 3, 5).
         (when (and (not preserve-whitespace)
                    (< pos end)
-                   (memq (aref string pos) '(?\s ?\t ?\n ?\r ?\f)))
+                   (cl--whitespace-char-p (aref string pos)))
           (setq pos (1+ pos)))
         (cons (car result) pos)))))
 
@@ -95,11 +109,11 @@ is exhausted, return EOF-VALUE; otherwise signal `end-of-file'."
                 ;; Emacs' reader hands back the character that ended the
                 ;; object (its one-char lookahead).  CL's `read' discards that
                 ;; character when it is whitespace; a macro-char terminator
-                ;; (e.g. ")") is never discarded.  `read-preserving-whitespace'
-                ;; keeps the whitespace.
+                ;; (e.g. ")") is kept.  `read-preserving-whitespace' keeps the
+                ;; whitespace too.  The test is a loop-free table lookup.
                 (progn
                   (unless (and (not preserve-whitespace)
-                               (memq unread '(?\s ?\t ?\n ?\r ?\f)))
+                               (cl--whitespace-char-p unread))
                     (cl-unread-char unread s))
                   nil)
               (cl-read-char s nil nil))))

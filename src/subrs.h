@@ -21,6 +21,7 @@ CL_SUBR(Fread_byte);
 CL_SUBR(Fread_char_no_hang);
 CL_SUBR(Fpeek_char);
 CL_SUBR(Funread_char);
+CL_SUBR(Fwhitespace_chars);
 CL_SUBR(Flisten);
 CL_SUBR(Fread_sequence);
 CL_SUBR(Fread_string);

@@ -392,7 +392,9 @@ string-input streams.
   discard/preserve, `cl-read-from-string` position past the delimiter) without
   re-implementing the reader's internals.  `cl-read-from-string` takes CL
   bounding indices, so an out-of-range `:start`/`:end` signals
-  `args-out-of-range`.
+  `args-out-of-range`.  The whitespace set (Space, Tab, Newline, Page, Return)
+  is defined once, in C, and exposed to Lisp as a loop-free lookup table, so
+  the reader's per-character callback never hardcodes or loops over it.
 
 - **`cl-unread-char` is strict (CL)**: `CHARACTER` must be the most recently
   read character, and unreading twice without an intervening read is an

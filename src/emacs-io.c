@@ -75,6 +75,13 @@ static const subr_def_t subrs[] = {
     "STREAM defaults to `*standard-input*'.\n"
     "\n(fn CHARACTER &optional STREAM)" },
 
+  { "cl--whitespace-chars", Fwhitespace_chars, 0, 0,
+    "Internal: return the CL whitespace characters as a string.\n"
+    "\n"
+    "The single definition of the set (Space, Tab, Newline, Page,\n"
+    "Return); the Lisp layer builds its loop-free lookup from it.\n"
+    "\n(fn)" },
+
   { "cl-listen", Flisten, 0, 1,
     "Return non-nil if a character is available on STREAM, nil otherwise.\n"
     "\n"
