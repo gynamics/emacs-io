@@ -131,8 +131,8 @@ typedef struct {
   bool           created;  /* true if cl-open created the file */
 } fd_stream_impl_t;
 
-#define FD_STREAM_RBUF_DEFAULT 8192
-#define FD_STREAM_WBUF_DEFAULT 8192
+#define FD_STREAM_RBUF_DEFAULT 4096
+#define FD_STREAM_WBUF_DEFAULT 4096
 
 /* mmap-backed input stream (regular files only) */
 typedef struct {

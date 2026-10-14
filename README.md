@@ -51,7 +51,7 @@ instead of the entry point.
 
 | Constructor | Backend | Direction |
 |---|---|---|
-| `cl-open` | POSIX `open(2)`, 8 KB ring buffers, `O_NONBLOCK` support | any |
+| `cl-open` | POSIX `open(2)`, 4 KB ring buffers, `O_NONBLOCK` support | any |
 | `cl-make-string-input-stream` | C `const char*` with position cursor | input |
 | `cl-make-string-output-stream` | Block-chain growable accumulator | output |
 | `cl-make-buffer-input-stream` | Emacs buffer snapshot at creation time | input |
@@ -285,7 +285,7 @@ over-read, the reader is linear, and no data is lost.  That also keeps
 ```
 src/stream.h     — cl_stream struct, vtable, impl structs, mem_cursor, public API
 src/stream.c     — dispatch layer, in-memory cursor ops, live-stream registry, allocation
-src/fdstream.c   — POSIX fd I/O with 8 KB userspace ring buffers
+src/fdstream.c   — POSIX fd I/O with 4 KB userspace ring buffers
 src/mmapstream.c — mmap-backed input for regular files (zero-copy reads)
 src/strstream.c  — string-input (mem_cursor), string-output (block-chain)
 src/bufstream.c  — buffer input (mem_cursor), buffer output (insert), buffer I/O (bidirectional)
