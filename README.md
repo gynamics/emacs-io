@@ -268,7 +268,7 @@ equivalent.
 | line read 10 K lines | 2.4 ms | 3.0 ms | **1.3×** |
 | comint incremental 10 K lines | 2.6 ms | 4.3 ms | **1.7×** |
 | grep 10 K lines | 4.2 ms | 4.6 ms | **1.1×** |
-| read 10 K generated S-expressions | 49.6 ms | 3.4 ms | **0.07×** |
+| read 10 K generated S-expressions | 42.0 ms | 3.4 ms | **0.08×** |
 
 Sequence I/O wins by **10–13×** by eliminating per-element C↔Lisp crossings:
 a single C `memcpy` of 100 KB replaces 100,000 iterations of `(aset vec i
@@ -283,15 +283,15 @@ over-read, the reader is linear, and no data is lost.  That is what keeps
 
 **`cl-read` is the *object* reader, and it is not a speed win.**  Reading Lisp
 objects means satisfying CL reader semantics — one-character lookahead,
-delimiter discard/preserve, `eof-error-p`/`eof-value` — so
-`cl-read` must feed Emacs' own reader.  A module can only do that through a
-**function stream**, i.e. a Lisp callback per character; there is no way to
-let the C reader pull directly from an emacs-io stream without changing Emacs'
-core (a first-class stream type in `readchar`/`printchar`), which is out of
-scope for a module.  So `cl-read` is roughly **15× slower** than Emacs' native
-`read` from a buffer for these objects — measured with a **byte-compiled**
-`emacs-io.el` (an interpreted glue file is ~5× slower still; `make bench`
-compiles it first, as an install would).
+delimiter discard/preserve, `eof-error-p`/`eof-value` — so `cl-read` must feed
+Emacs' own reader.  A module can only do that through a **function stream**,
+i.e. a callback per character; there is no way to let the C reader pull
+directly from an emacs-io stream without changing Emacs' core (a first-class
+stream type in `readchar`/`printchar`), which is out of scope for a module.
+So `cl-read` is roughly **12× slower** than Emacs' native `read` from a buffer
+for these objects — measured with a **byte-compiled** `emacs-io.el` (an
+interpreted glue file is ~5× slower still; `make bench` compiles it first, as
+an install would).
 
 The guidance follows from that: **use `cl-read` only when you actually need to
 read Lisp objects** (e.g. transplanting Common Lisp code).  For raw data it is
@@ -299,6 +299,34 @@ the wrong tool — `cl-read-char` / `cl-read-line` / `cl-read-string` /
 `cl-read-chunk` / `cl-read-sequence` are bulk C transfers that are not
 constrained by Lisp syntax and are 10–13× faster (see the wins above).  Do not
 pay the reader cost to move bytes.
+
+### The module boundary
+
+The numbers above are not an accident of this implementation; they follow from
+how Emacs modules cross into the Lisp world, and the design rule is simply
+**batch, don't per-item cross**:
+
+- An `emacs_value` is an **opaque handle**.  Every operation on one is an
+  indirect call through the `emacs_env` vtable, and a module cannot reach
+  `Lisp_Object`, buffer text, or a symbol's internals.  Per-element work at the
+  boundary is therefore expensive, while one `memcpy` behind a single call is
+  cheap — which is exactly why the sequence/file/chunk paths win 5–13×.
+- A value returned to C is a **local reference** that expires when the call
+  returns; anything that must persist (interned symbols, `nil`/`t`, the
+  `*standard-input*` variable names) must be promoted with `make_global_ref`.
+  Those long-lived references are the module's **pre-interned symbol table**
+  (`src/syms.h`, filled once by `syms_init`), so hot paths compare and call
+  without re-interning by name.
+- The API has **no lookup-only intern** and **no first-class stream type** that
+  could be handed to `readchar`/`printchar`, so `cl-read` is forced onto the
+  function-stream path — one boundary crossing per character.
+
+There is still headroom in that last path: the reader function is currently an
+**Elisp lambda** that calls the `cl-read-char` subr, i.e. *two* crossings per
+character.  Supplying the reader as a **C module function** (`make_function`
+over a small state struct) would read the stream directly from C and remove the
+Elisp layer, cutting the per-character cost — future work, and one that keeps
+`cl-read` incremental (no over-read).
 
 ## Architecture
 
@@ -343,6 +371,12 @@ string-input streams.
   predicates.  The reader/printer glue lives in `emacs-io.el`, which requires
   the core module — so the install directory must be on `load-path` and
   `emacs-io.el` must sit next to `emacs-io-core.so`.
+
+- **The module boundary is the cost model**: `emacs_value`s are opaque handles
+  and values are call-local references, so the C core batches work behind few
+  calls (a bulk `memcpy`, mmap) and interns the symbols it needs once into a
+  global table (`src/syms.h`).  Per-item crossing loses — see
+  [The module boundary](#the-module-boundary).
 
 - **`cl-read` is incremental**: it drives Emacs' own reader one character at a
   time straight from the stream (a function stream over `cl-read-char` /

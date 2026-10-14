@@ -244,8 +244,7 @@ emacs_value str_output_to_string(emacs_env *env, cl_stream_t *s) {
     elts[i] = env->make_string(env, bk->data, (ptrdiff_t)bk->len);
   }
 
-  emacs_value concat_sym = eintern(env, "concat");
-  emacs_value result = env->funcall(env, concat_sym, nblocks, elts);
+  emacs_value result = env->funcall(env, syms.fn_concat, nblocks, elts);
   free(elts);
   return result;
 }

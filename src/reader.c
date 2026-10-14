@@ -358,10 +358,9 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
     if (!buf) { signal_error(env, "Memory allocation failed"); return syms.v_nil; }
 
     ptrdiff_t r = stream_read(s, buf, count);
-    emacs_value aset_sym = eintern(env, "aset");
     for (ptrdiff_t i = 0; i < r && i < count; i++) {
       emacs_value av[3] = { seq, eint(env, start + i), eint(env, buf[i]) };
-      env->funcall(env, aset_sym, 3, av);
+      efuncall_cached(env, syms.fn_aset, 3, av);
     }
     free(buf);
     return eint(env, start + (r > 0 ? r : 0));
@@ -370,15 +369,15 @@ emacs_value Fread_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   /* list: advance to start, read one byte per element */
   emacs_value cell = seq;
   for (ptrdiff_t i = 0; i < start && env->is_not_nil(env, cell); i++)
-    cell = efuncall(env, "cdr", 1, &cell);
+    cell = efuncall_cached(env, syms.fn_cdr, 1, &cell);
 
   ptrdiff_t i = 0;
   while (i < count && env->is_not_nil(env, cell)) {
     unsigned char b;
     ptrdiff_t r = stream_read(s, &b, 1);
     if (r <= 0) break;
-    efuncall(env, "setcar", 2, (emacs_value[]){ cell, eint(env, b) });
-    cell = efuncall(env, "cdr", 1, &cell);
+    efuncall_cached(env, syms.fn_setcar, 2, (emacs_value[]){ cell, eint(env, b) });
+    cell = efuncall_cached(env, syms.fn_cdr, 1, &cell);
     i++;
   }
   return eint(env, start + i);

@@ -295,14 +295,14 @@ emacs_value Fwrite_sequence(emacs_env *env, ptrdiff_t nargs, emacs_value *args,
   /* list: advance to start, write one element at a time */
   emacs_value cell = seq;
   for (ptrdiff_t i = 0; i < start && env->is_not_nil(env, cell); i++)
-    cell = efuncall(env, "cdr", 1, &cell);
+    cell = efuncall_cached(env, syms.fn_cdr, 1, &cell);
 
   ptrdiff_t i = 0;
   while (i < count && env->is_not_nil(env, cell)) {
     unsigned char b = (unsigned char)eint_extract(env,
-                       efuncall(env, "car", 1, &cell));
+                       efuncall_cached(env, syms.fn_car, 1, &cell));
     stream_write(s, &b, 1);
-    cell = efuncall(env, "cdr", 1, &cell);
+    cell = efuncall_cached(env, syms.fn_cdr, 1, &cell);
     i++;
   }
   return seq;

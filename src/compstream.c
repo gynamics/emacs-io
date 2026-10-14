@@ -498,7 +498,7 @@ emacs_value Fmake_synonym_stream(emacs_env *env, ptrdiff_t nargs,
     return syms.v_nil;
   }
   /* look up the symbol's dynamic value to get the target stream */
-  emacs_value target_val = efuncall(env, "symbol-value", 1, &args[0]);
+  emacs_value target_val = efuncall_cached(env, syms.fn_symbol_value, 1, &args[0]);
   cl_stream_t *target = euser_ptr_stream_get(env, target_val);
   if (!target) {
     signal_error(env, "Synonym target is not a stream");

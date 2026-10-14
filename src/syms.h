@@ -20,12 +20,14 @@ typedef struct {
 
   /* Lisp function names */
   emacs_value fn_car, fn_cdr, fn_list, fn_cons, fn_set;
+  emacs_value fn_setcar, fn_aset, fn_concat;
   emacs_value fn_symbol_value, fn_read_from_string, fn_prin1_to_string;
   emacs_value fn_buffer_substring, fn_buffer_size;
   emacs_value fn_error, fn_signal;
 
-  /* common values */
+  /* common values and type symbols */
   emacs_value v_nil, v_t, v_character, v_string;
+  emacs_value v_vector, v_cons;
   emacs_value v_end_of_file;
   emacs_value v_unsigned_byte_8;
 

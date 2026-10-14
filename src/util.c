@@ -210,6 +210,9 @@ void syms_init(emacs_env *env) {
   syms.fn_list           = G(eintern(env, "list"));
   syms.fn_cons           = G(eintern(env, "cons"));
   syms.fn_set            = G(eintern(env, "set"));
+  syms.fn_setcar         = G(eintern(env, "setcar"));
+  syms.fn_aset           = G(eintern(env, "aset"));
+  syms.fn_concat         = G(eintern(env, "concat"));
   syms.fn_symbol_value   = G(eintern(env, "symbol-value"));
   syms.fn_read_from_string = G(eintern(env, "read-from-string"));
   syms.fn_prin1_to_string = G(eintern(env, "prin1-to-string"));
@@ -222,6 +225,8 @@ void syms_init(emacs_env *env) {
   syms.v_t         = G(eintern(env, "t"));
   syms.v_character = G(eintern(env, "character"));
   syms.v_string    = G(eintern(env, "string"));
+  syms.v_vector    = G(eintern(env, "vector"));
+  syms.v_cons      = G(eintern(env, "cons"));
   syms.v_end_of_file = G(eintern(env, "end-of-file"));
   syms.v_unsigned_byte_8 = G(eintern(env, "unsigned-byte"));
 
@@ -258,7 +263,7 @@ cl_stream_t *get_stream_or_default_cached(emacs_env *env, emacs_value *args,
 cl_seq_kind_t seq_classify(emacs_env *env, emacs_value seq, ptrdiff_t *len_out) {
   emacs_value type = env->type_of(env, seq);
 
-  if (env->eq(env, type, eintern(env, "vector"))) {
+  if (env->eq(env, type, syms.v_vector)) {
     *len_out = env->vec_size(env, seq);
     return CL_SEQ_VECTOR;
   }
@@ -268,7 +273,7 @@ cl_seq_kind_t seq_classify(emacs_env *env, emacs_value seq, ptrdiff_t *len_out) 
     *len_out = n - 1;  /* exclude the trailing NUL */
     return CL_SEQ_STRING;
   }
-  if (env->eq(env, type, eintern(env, "cons"))) {
+  if (env->eq(env, type, syms.v_cons)) {
     *len_out = 1 << 30;  /* a list has no cheap length: treat as unbounded */
     return CL_SEQ_LIST;
   }
